@@ -29,11 +29,11 @@ func AfterColumnPosition(name string) *ColumnPosition {
 }
 
 func BuildAlterTable(database string, name string, clusterName *string, actions []string) (string, error) {
-	if strings.TrimSpace(database) == "" {
-		return "", errors.New("database cannot be empty for ALTER TABLE queries")
+	if err := validateRequiredField(database, "database", "ALTER TABLE"); err != nil {
+		return "", err
 	}
-	if strings.TrimSpace(name) == "" {
-		return "", errors.New("name cannot be empty for ALTER TABLE queries")
+	if err := validateRequiredField(name, "name", "ALTER TABLE"); err != nil {
+		return "", err
 	}
 	if len(actions) == 0 {
 		return "", errors.New("ALTER TABLE queries require at least one action")
@@ -56,9 +56,7 @@ func BuildAlterTable(database string, name string, clusterName *string, actions 
 		"TABLE",
 		qualifiedIdentifier(database, name),
 	}
-	if clusterName != nil {
-		tokens = append(tokens, "ON", "CLUSTER", quote(*clusterName))
-	}
+	tokens = appendClusterClause(tokens, clusterName)
 	tokens = append(tokens, strings.Join(filtered, ", "))
 
 	return strings.Join(tokens, " ") + ";", nil

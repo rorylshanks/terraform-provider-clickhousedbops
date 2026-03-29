@@ -226,7 +226,11 @@ func parseCreateDictionaryDefinition(createStatement string) (createDictionaryDe
 		if srcIndex != -1 {
 			pkValue = pkValue[:srcIndex]
 		}
-		definition.PrimaryKey = parsePrimaryKeyList(strings.TrimSpace(pkValue))
+		pk, err := parsePrimaryKeyList(strings.TrimSpace(pkValue))
+		if err != nil {
+			return definition, err
+		}
+		definition.PrimaryKey = pk
 	}
 
 	// SOURCE(...) — extract inner content
@@ -381,28 +385,48 @@ func parseDictionaryAttribute(raw string) (DictionaryAttribute, error) {
 
 	remainder = strings.TrimSpace(remainder[typEnd:])
 
-	// Parse modifier keywords
+	// Parse modifier keywords using SQL-aware keyword matching
 	for remainder != "" {
-		if strings.HasPrefix(remainder, "DEFAULT") {
-			remainder = strings.TrimSpace(remainder[len("DEFAULT"):])
-			expr, rest := extractExpressionUntilKeyword(remainder)
-			attr.DefaultExpression = &expr
-			remainder = rest
-		} else if strings.HasPrefix(remainder, "EXPRESSION") {
-			remainder = strings.TrimSpace(remainder[len("EXPRESSION"):])
-			expr, rest := extractExpressionUntilKeyword(remainder)
-			attr.Expression = &expr
-			remainder = rest
-		} else if strings.HasPrefix(remainder, "HIERARCHICAL") {
-			attr.Hierarchical = true
-			remainder = strings.TrimSpace(remainder[len("HIERARCHICAL"):])
-		} else if strings.HasPrefix(remainder, "INJECTIVE") {
-			attr.Injective = true
-			remainder = strings.TrimSpace(remainder[len("INJECTIVE"):])
-		} else if strings.HasPrefix(remainder, "IS_OBJECT_ID") {
-			attr.IsObjectID = true
-			remainder = strings.TrimSpace(remainder[len("IS_OBJECT_ID"):])
-		} else {
+		matched := false
+		for _, kw := range []string{"DEFAULT", "EXPRESSION", "HIERARCHICAL", "INJECTIVE", "IS_OBJECT_ID"} {
+			idx, err := querybuilder.FindTopLevelKeyword(remainder, kw, 0)
+			if err != nil {
+				return attr, err
+			}
+			if idx != 0 {
+				continue
+			}
+			matched = true
+			switch kw {
+			case "DEFAULT":
+				remainder = strings.TrimSpace(remainder[len("DEFAULT"):])
+				expr, rest, err := extractExpressionUntilKeyword(remainder)
+				if err != nil {
+					return attr, err
+				}
+				attr.DefaultExpression = &expr
+				remainder = rest
+			case "EXPRESSION":
+				remainder = strings.TrimSpace(remainder[len("EXPRESSION"):])
+				expr, rest, err := extractExpressionUntilKeyword(remainder)
+				if err != nil {
+					return attr, err
+				}
+				attr.Expression = &expr
+				remainder = rest
+			case "HIERARCHICAL":
+				attr.Hierarchical = true
+				remainder = strings.TrimSpace(remainder[len("HIERARCHICAL"):])
+			case "INJECTIVE":
+				attr.Injective = true
+				remainder = strings.TrimSpace(remainder[len("INJECTIVE"):])
+			case "IS_OBJECT_ID":
+				attr.IsObjectID = true
+				remainder = strings.TrimSpace(remainder[len("IS_OBJECT_ID"):])
+			}
+			break
+		}
+		if !matched {
 			break
 		}
 	}
@@ -412,27 +436,39 @@ func parseDictionaryAttribute(raw string) (DictionaryAttribute, error) {
 
 // extractExpressionUntilKeyword extracts an expression value that ends before
 // the next dictionary attribute keyword or end of string.
-func extractExpressionUntilKeyword(raw string) (string, string) {
+func extractExpressionUntilKeyword(raw string) (string, string, error) {
 	keywords := []string{"DEFAULT", "EXPRESSION", "HIERARCHICAL", "INJECTIVE", "IS_OBJECT_ID"}
 	minIdx := len(raw)
 	for _, kw := range keywords {
-		idx, _ := querybuilder.FindTopLevelKeyword(raw, kw, 0)
+		idx, err := querybuilder.FindTopLevelKeyword(raw, kw, 0)
+		if err != nil {
+			return "", "", errors.WithMessage(err, "error scanning dictionary attribute expression")
+		}
 		if idx != -1 && idx < minIdx {
 			minIdx = idx
 		}
 	}
-	return strings.TrimSpace(raw[:minIdx]), strings.TrimSpace(raw[minIdx:])
+	return strings.TrimSpace(raw[:minIdx]), strings.TrimSpace(raw[minIdx:]), nil
 }
 
 // parsePrimaryKeyList parses a PRIMARY KEY value which may be a single identifier
 // or a parenthesized comma-separated list.
-func parsePrimaryKeyList(raw string) []string {
+func parsePrimaryKeyList(raw string) ([]string, error) {
 	raw = strings.TrimSpace(raw)
-	// Strip outer parens if present
-	if strings.HasPrefix(raw, "(") && strings.HasSuffix(raw, ")") {
-		raw = raw[1 : len(raw)-1]
+	// Strip outer parens using balanced-paren detection
+	if strings.HasPrefix(raw, "(") {
+		closeIdx, err := querybuilder.FindMatchingClose(raw, 0)
+		if err != nil {
+			return nil, errors.WithMessage(err, "error parsing PRIMARY KEY list")
+		}
+		if closeIdx == len(raw)-1 {
+			raw = raw[1:closeIdx]
+		}
 	}
-	parts := strings.Split(raw, ",")
+	parts, err := querybuilder.SplitTopLevelCSV(raw)
+	if err != nil {
+		return nil, errors.WithMessage(err, "error splitting PRIMARY KEY list")
+	}
 	result := make([]string, 0, len(parts))
 	for _, p := range parts {
 		p = strings.TrimSpace(p)
@@ -440,5 +476,5 @@ func parsePrimaryKeyList(raw string) []string {
 			result = append(result, querybuilder.UnquoteIdentifier(p))
 		}
 	}
-	return result
+	return result, nil
 }

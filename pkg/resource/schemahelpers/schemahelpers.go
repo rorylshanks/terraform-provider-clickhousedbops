@@ -362,7 +362,7 @@ func CommonSchemaAttributes(objectType string) map[string]schema.Attribute {
 		},
 		"name": schema.StringAttribute{
 			Required:    true,
-			Description: fmt.Sprintf("%s name", strings.Title(objectType)),
+			Description: fmt.Sprintf("%s name", titleCase(objectType)),
 			Validators: []validator.String{
 				stringvalidator.LengthAtLeast(1),
 			},
@@ -399,4 +399,11 @@ func ImportSchemaObjectState(ctx context.Context, req resource.ImportStateReques
 	if clusterName != nil {
 		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("cluster_name"), *clusterName)...)
 	}
+}
+
+func titleCase(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
 }

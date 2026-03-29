@@ -143,7 +143,7 @@ func (r *Resource) createView(ctx context.Context, plan ViewResourceModel) (*Vie
 	}
 
 	createdView, err := r.client.CreateView(ctx, view, plan.ClusterName.ValueStringPointer())
-	diags.Append(schemahelpers.DiagnosticsFromErr("Invalid view configuration", err)...)
+	diags.Append(schemahelpers.DiagnosticsFromErr("Error creating view", err)...)
 	if diags.HasError() {
 		return nil, diags
 	}
@@ -177,9 +177,16 @@ func syncViewState(ctx context.Context, state *ViewResourceModel, view *dbops.Vi
 
 	if strings.TrimSpace(view.Query) != "" {
 		state.Query = types.StringValue(view.Query)
+	} else if !state.Query.IsNull() && !state.Query.IsUnknown() {
+		state.Query = types.StringNull()
 	}
 
-	if len(view.Columns) > 0 || (!state.Columns.IsNull() && !state.Columns.IsUnknown()) {
+	currentColumns, columnDiags := schemahelpers.ExpandColumnSignatures(ctx, state.Columns)
+	diags.Append(columnDiags...)
+	if diags.HasError() {
+		return diags
+	}
+	if !columnSignaturesEqual(currentColumns, view.Columns) {
 		columns, columnDiags := schemahelpers.ColumnSignaturesValue(ctx, view.Columns)
 		diags.Append(columnDiags...)
 		if diags.HasError() {
@@ -189,4 +196,18 @@ func syncViewState(ctx context.Context, state *ViewResourceModel, view *dbops.Vi
 	}
 
 	return diags
+}
+
+func columnSignaturesEqual(left []dbops.Column, right []dbops.Column) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i].Name != right[i].Name ||
+			left[i].Nullable != right[i].Nullable ||
+			strings.TrimSpace(left[i].Type) != strings.TrimSpace(right[i].Type) {
+			return false
+		}
+	}
+	return true
 }

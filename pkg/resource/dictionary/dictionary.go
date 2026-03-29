@@ -5,9 +5,11 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -264,7 +266,7 @@ func (r *Resource) createDictionary(ctx context.Context, plan DictionaryResource
 	}
 
 	createdDictionary, err := r.client.CreateDictionary(ctx, dictionary, plan.ClusterName.ValueStringPointer())
-	diags.Append(schemahelpers.DiagnosticsFromErr("Invalid dictionary configuration", err)...)
+	diags.Append(schemahelpers.DiagnosticsFromErr("Error creating dictionary", err)...)
 	if diags.HasError() {
 		return nil, diags
 	}
@@ -282,64 +284,72 @@ func (r *Resource) createDictionary(ctx context.Context, plan DictionaryResource
 func syncDictionaryState(ctx context.Context, state *DictionaryResourceModel, dict *dbops.Dictionary) diag.Diagnostics {
 	var diags diag.Diagnostics
 
-	if dict.Comment != "" {
-		state.Comment = types.StringValue(dict.Comment)
-	}
-	if dict.Source != "" {
-		state.Source = types.StringValue(dict.Source)
-	}
-	if dict.Layout != "" {
-		state.Layout = types.StringValue(dict.Layout)
-	}
-	if dict.Lifetime != "" {
-		state.Lifetime = types.StringValue(dict.Lifetime)
-	}
-	if dict.Settings != "" {
-		state.Settings = types.StringValue(dict.Settings)
+	state.Comment = syncOptionalString(state.Comment, dict.Comment)
+	state.Source = syncOptionalString(state.Source, dict.Source)
+	state.Layout = syncOptionalString(state.Layout, dict.Layout)
+	state.Lifetime = syncOptionalString(state.Lifetime, dict.Lifetime)
+	state.Settings = syncOptionalString(state.Settings, dict.Settings)
+
+	attrModels := make([]attributeModel, 0, len(dict.Attributes))
+	for _, attr := range dict.Attributes {
+		model := attributeModel{
+			Name:         types.StringValue(attr.Name),
+			Type:         types.StringValue(attr.Type),
+			Nullable:     types.BoolValue(attr.Nullable),
+			Hierarchical: types.BoolValue(attr.Hierarchical),
+			Injective:    types.BoolValue(attr.Injective),
+			IsObjectID:   types.BoolValue(attr.IsObjectID),
+		}
+		if attr.DefaultExpression != nil {
+			model.DefaultExpression = types.StringValue(*attr.DefaultExpression)
+		} else {
+			model.DefaultExpression = types.StringNull()
+		}
+		if attr.Expression != nil {
+			model.Expression = types.StringValue(*attr.Expression)
+		} else {
+			model.Expression = types.StringNull()
+		}
+		attrModels = append(attrModels, model)
 	}
 
-	if len(dict.Attributes) > 0 {
-		attrModels := make([]attributeModel, 0, len(dict.Attributes))
-		for _, attr := range dict.Attributes {
-			model := attributeModel{
-				Name:         types.StringValue(attr.Name),
-				Type:         types.StringValue(attr.Type),
-				Nullable:     types.BoolValue(attr.Nullable),
-				Hierarchical: types.BoolValue(attr.Hierarchical),
-				Injective:    types.BoolValue(attr.Injective),
-				IsObjectID:   types.BoolValue(attr.IsObjectID),
-			}
-			if attr.DefaultExpression != nil {
-				model.DefaultExpression = types.StringValue(*attr.DefaultExpression)
-			} else {
-				model.DefaultExpression = types.StringNull()
-			}
-			if attr.Expression != nil {
-				model.Expression = types.StringValue(*attr.Expression)
-			} else {
-				model.Expression = types.StringNull()
-			}
-			attrModels = append(attrModels, model)
-		}
-
-		attrList, attrDiags := types.ListValueFrom(ctx, state.Attributes.ElementType(ctx), attrModels)
-		diags.Append(attrDiags...)
-		if diags.HasError() {
-			return diags
-		}
-		state.Attributes = attrList
+	attrList, attrDiags := types.ListValueFrom(ctx, dictionaryAttributeObjectType(), attrModels)
+	diags.Append(attrDiags...)
+	if diags.HasError() {
+		return diags
 	}
+	state.Attributes = attrList
 
-	if len(dict.PrimaryKey) > 0 {
-		pkList, pkDiags := types.ListValueFrom(ctx, types.StringType, dict.PrimaryKey)
-		diags.Append(pkDiags...)
-		if diags.HasError() {
-			return diags
-		}
-		state.PrimaryKey = pkList
+	pkList, pkDiags := types.ListValueFrom(ctx, types.StringType, dict.PrimaryKey)
+	diags.Append(pkDiags...)
+	if diags.HasError() {
+		return diags
 	}
+	state.PrimaryKey = pkList
 
 	return diags
+}
+
+func syncOptionalString(current types.String, remote string) types.String {
+	if strings.TrimSpace(remote) == "" {
+		return types.StringNull()
+	}
+	return types.StringValue(remote)
+}
+
+func dictionaryAttributeObjectType() types.ObjectType {
+	return types.ObjectType{
+		AttrTypes: map[string]attr.Type{
+			"name":               types.StringType,
+			"type":               types.StringType,
+			"nullable":           types.BoolType,
+			"default_expression": types.StringType,
+			"expression":         types.StringType,
+			"hierarchical":       types.BoolType,
+			"injective":          types.BoolType,
+			"is_object_id":       types.BoolType,
+		},
+	}
 }
 
 func expandDictionaryModel(ctx context.Context, plan DictionaryResourceModel) (dbops.Dictionary, error) {

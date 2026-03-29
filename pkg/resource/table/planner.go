@@ -422,11 +422,11 @@ func applySafeRenames(current dbops.Table, desired dbops.Table) ([]dbops.Column,
 func buildOrderByAlterAction(current string, desired string, addedColumns map[string]dbops.Column) (string, bool, error) {
 	currentExprs, err := splitExpressionList(current)
 	if err != nil {
-		return "", false, nil
+		return "", false, err
 	}
 	desiredExprs, err := splitExpressionList(desired)
 	if err != nil {
-		return "", false, nil
+		return "", false, err
 	}
 	if len(desiredExprs) <= len(currentExprs) || len(currentExprs) == 0 {
 		return "", false, nil

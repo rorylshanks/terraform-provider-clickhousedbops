@@ -305,6 +305,10 @@ func (r *Resource) Update(ctx context.Context, req resource.UpdateRequest, resp 
 	}
 
 	newState := plan
+	resp.Diagnostics.Append(syncTableState(ctx, &newState, updatedTable, settingCapabilities)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 	schemahelpers.SyncObjectState(newState.ClusterName, newState.Database, newState.Name, updatedTable.CreateStatement, &newState.ID, &newState.QualifiedName, &newState.CreateStatement)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &newState)...)
 }
@@ -335,7 +339,7 @@ func (r *Resource) createTable(ctx context.Context, plan TableResourceModel) (*T
 	}
 
 	createdTable, err := r.client.CreateTable(ctx, table, plan.ClusterName.ValueStringPointer())
-	diags.Append(schemahelpers.DiagnosticsFromErr("Invalid table configuration", err)...)
+	diags.Append(schemahelpers.DiagnosticsFromErr("Error creating table", err)...)
 	if diags.HasError() {
 		return nil, diags
 	}
