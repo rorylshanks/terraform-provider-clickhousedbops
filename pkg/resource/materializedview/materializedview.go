@@ -4,7 +4,6 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
-	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/resourcevalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
@@ -229,9 +228,9 @@ func (r *Resource) ImportState(ctx context.Context, req resource.ImportStateRequ
 func syncMaterializedViewState(ctx context.Context, state *MaterializedViewResourceModel, view *dbops.MaterializedView) diag.Diagnostics {
 	var diags diag.Diagnostics
 
-	state.Query = syncOptionalString(state.Query, view.Query)
-	state.Engine = syncOptionalString(state.Engine, view.Engine)
-	state.ToTable = syncOptionalString(state.ToTable, view.ToTable)
+	state.Query = schemahelpers.SyncOptionalString(state.Query, view.Query)
+	state.Engine = schemahelpers.SyncOptionalString(state.Engine, view.Engine)
+	state.ToTable = schemahelpers.SyncOptionalString(state.ToTable, view.ToTable)
 
 	if view.Populate || (!state.Populate.IsNull() && !state.Populate.IsUnknown()) {
 		state.Populate = types.BoolValue(view.Populate)
@@ -243,7 +242,7 @@ func syncMaterializedViewState(ctx context.Context, state *MaterializedViewResou
 	if diags.HasError() {
 		return diags
 	}
-	if !columnsEqual(currentColumns, view.Columns) {
+	if !schemahelpers.ColumnsEqual(currentColumns, view.Columns) {
 		columns, columnDiags := schemahelpers.ColumnsValue(ctx, view.Columns)
 		diags.Append(columnDiags...)
 		if diags.HasError() {
@@ -258,7 +257,7 @@ func syncMaterializedViewState(ctx context.Context, state *MaterializedViewResou
 	if diags.HasError() {
 		return diags
 	}
-	if !columnSignaturesEqual(currentToColumns, view.ToColumns) {
+	if !schemahelpers.ColumnSignaturesEqual(currentToColumns, view.ToColumns) {
 		toColumns, columnDiags := schemahelpers.ColumnSignaturesValue(ctx, view.ToColumns)
 		diags.Append(columnDiags...)
 		if diags.HasError() {
@@ -268,58 +267,6 @@ func syncMaterializedViewState(ctx context.Context, state *MaterializedViewResou
 	}
 
 	return diags
-}
-
-func syncOptionalString(current types.String, remote string) types.String {
-	if strings.TrimSpace(remote) == "" {
-		if !current.IsNull() && !current.IsUnknown() {
-			return types.StringNull()
-		}
-		return current
-	}
-	return types.StringValue(remote)
-}
-
-func columnsEqual(left []dbops.Column, right []dbops.Column) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	for i := range left {
-		if left[i].Name != right[i].Name ||
-			left[i].Nullable != right[i].Nullable ||
-			strings.TrimSpace(left[i].Type) != strings.TrimSpace(right[i].Type) ||
-			left[i].Comment != right[i].Comment ||
-			!ptrStrEqual(left[i].DefaultExpression, right[i].DefaultExpression) ||
-			!ptrStrEqual(left[i].MaterializedExpression, right[i].MaterializedExpression) ||
-			!ptrStrEqual(left[i].AliasExpression, right[i].AliasExpression) {
-			return false
-		}
-	}
-	return true
-}
-
-func columnSignaturesEqual(left []dbops.Column, right []dbops.Column) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	for i := range left {
-		if left[i].Name != right[i].Name ||
-			left[i].Nullable != right[i].Nullable ||
-			strings.TrimSpace(left[i].Type) != strings.TrimSpace(right[i].Type) {
-			return false
-		}
-	}
-	return true
-}
-
-func ptrStrEqual(a *string, b *string) bool {
-	if a == nil && b == nil {
-		return true
-	}
-	if a == nil || b == nil {
-		return false
-	}
-	return strings.TrimSpace(*a) == strings.TrimSpace(*b)
 }
 
 func expandMaterializedViewModel(ctx context.Context, plan MaterializedViewResourceModel) (dbops.MaterializedView, error) {

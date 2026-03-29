@@ -5,7 +5,6 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
@@ -284,11 +283,11 @@ func (r *Resource) createDictionary(ctx context.Context, plan DictionaryResource
 func syncDictionaryState(ctx context.Context, state *DictionaryResourceModel, dict *dbops.Dictionary) diag.Diagnostics {
 	var diags diag.Diagnostics
 
-	state.Comment = syncOptionalString(state.Comment, dict.Comment)
-	state.Source = syncOptionalString(state.Source, dict.Source)
-	state.Layout = syncOptionalString(state.Layout, dict.Layout)
-	state.Lifetime = syncOptionalString(state.Lifetime, dict.Lifetime)
-	state.Settings = syncOptionalString(state.Settings, dict.Settings)
+	state.Comment = schemahelpers.SyncOptionalString(state.Comment, dict.Comment)
+	state.Source = schemahelpers.SyncOptionalString(state.Source, dict.Source)
+	state.Layout = schemahelpers.SyncOptionalString(state.Layout, dict.Layout)
+	state.Lifetime = schemahelpers.SyncOptionalString(state.Lifetime, dict.Lifetime)
+	state.Settings = schemahelpers.SyncOptionalString(state.Settings, dict.Settings)
 
 	attrModels := make([]attributeModel, 0, len(dict.Attributes))
 	for _, attr := range dict.Attributes {
@@ -328,13 +327,6 @@ func syncDictionaryState(ctx context.Context, state *DictionaryResourceModel, di
 	state.PrimaryKey = pkList
 
 	return diags
-}
-
-func syncOptionalString(current types.String, remote string) types.String {
-	if strings.TrimSpace(remote) == "" {
-		return types.StringNull()
-	}
-	return types.StringValue(remote)
 }
 
 func dictionaryAttributeObjectType() types.ObjectType {

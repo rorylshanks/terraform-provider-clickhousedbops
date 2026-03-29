@@ -392,7 +392,7 @@ func syncTableState(ctx context.Context, state *TableResourceModel, table *dbops
 	if diags.HasError() {
 		return diags
 	}
-	if !columnsEqual(currentColumns, table.Columns) {
+	if !schemahelpers.ColumnsEqual(currentColumns, table.Columns) {
 		state.Columns, columnDiags = schemahelpers.ColumnsValue(ctx, table.Columns)
 		diags.Append(columnDiags...)
 	}

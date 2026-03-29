@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/ClickHouse/terraform-provider-clickhousedbops/internal/dbops"
+	"github.com/ClickHouse/terraform-provider-clickhousedbops/internal/querybuilder"
 )
 
 func TestValidateTableForEngineKafkaDefaults(t *testing.T) {
@@ -240,9 +241,9 @@ func TestPlanTableUpdateTreatsEquivalentTTLAsUnchanged(t *testing.T) {
 }
 
 func TestSplitTopLevelHandlesBackslashEscapedSingleQuote(t *testing.T) {
-	parts, err := splitTopLevel("path = 'it\\'s,ok', retries = 3", ',')
+	parts, err := querybuilder.SplitTopLevel("path = 'it\\'s,ok', retries = 3", ',')
 	if err != nil {
-		t.Fatalf("splitTopLevel() error = %v", err)
+		t.Fatalf("SplitTopLevel() error = %v", err)
 	}
 	if len(parts) != 2 {
 		t.Fatalf("expected 2 parts, got %d: %#v", len(parts), parts)
@@ -250,9 +251,9 @@ func TestSplitTopLevelHandlesBackslashEscapedSingleQuote(t *testing.T) {
 }
 
 func TestSplitTopLevelHandlesDoubledSingleQuote(t *testing.T) {
-	parts, err := splitTopLevel("comment = 'team''s,blue', retries = 3", ',')
+	parts, err := querybuilder.SplitTopLevel("comment = 'team''s,blue', retries = 3", ',')
 	if err != nil {
-		t.Fatalf("splitTopLevel() error = %v", err)
+		t.Fatalf("SplitTopLevel() error = %v", err)
 	}
 	if len(parts) != 2 {
 		t.Fatalf("expected 2 parts, got %d: %#v", len(parts), parts)

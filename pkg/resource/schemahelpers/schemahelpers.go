@@ -314,6 +314,70 @@ func columnSignatureObjectAttrTypes() map[string]attr.Type {
 	}
 }
 
+// OptionalStringsEqual compares two optional string pointers, treating nil and
+// empty/whitespace-only values as equivalent.
+func OptionalStringsEqual(a *string, b *string) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return strings.TrimSpace(*a) == strings.TrimSpace(*b)
+}
+
+// ColumnEqual compares two columns for equality, trimming whitespace in string fields.
+func ColumnEqual(left dbops.Column, right dbops.Column) bool {
+	return left.Name == right.Name &&
+		left.Nullable == right.Nullable &&
+		strings.TrimSpace(left.Type) == strings.TrimSpace(right.Type) &&
+		strings.TrimSpace(left.Comment) == strings.TrimSpace(right.Comment) &&
+		OptionalStringsEqual(left.DefaultExpression, right.DefaultExpression) &&
+		OptionalStringsEqual(left.MaterializedExpression, right.MaterializedExpression) &&
+		OptionalStringsEqual(left.AliasExpression, right.AliasExpression)
+}
+
+// ColumnsEqual compares two column slices for equality including all fields.
+func ColumnsEqual(left []dbops.Column, right []dbops.Column) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if !ColumnEqual(left[i], right[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// ColumnSignaturesEqual compares two column slices for equality considering
+// only name, type, and nullable (the fields present in a column signature).
+func ColumnSignaturesEqual(left []dbops.Column, right []dbops.Column) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i].Name != right[i].Name ||
+			left[i].Nullable != right[i].Nullable ||
+			strings.TrimSpace(left[i].Type) != strings.TrimSpace(right[i].Type) {
+			return false
+		}
+	}
+	return true
+}
+
+// SyncOptionalString updates a Terraform string attribute from a remote value,
+// preserving null/unknown when the remote is empty.
+func SyncOptionalString(current types.String, remote string) types.String {
+	if strings.TrimSpace(remote) == "" {
+		if !current.IsNull() && !current.IsUnknown() {
+			return types.StringNull()
+		}
+		return current
+	}
+	return types.StringValue(remote)
+}
+
 func optionalStringValue(value *string) types.String {
 	if value == nil || strings.TrimSpace(*value) == "" {
 		return types.StringNull()

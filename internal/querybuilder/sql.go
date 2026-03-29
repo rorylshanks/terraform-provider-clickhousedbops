@@ -47,31 +47,50 @@ func IsClauseBoundary(raw string, index int) bool {
 	}
 }
 
-// SplitTopLevelCSV splits a SQL fragment on commas that appear at the top level
-// (outside parentheses and quotes).
-func SplitTopLevelCSV(raw string) ([]string, error) {
+// SplitTopLevel splits a SQL fragment on the given separator byte at the top
+// level (outside parentheses and quotes). Parts are returned untrimmed.
+func SplitTopLevel(raw string, separator byte) ([]string, error) {
 	parts := make([]string, 0)
 	start := 0
 	state := SQLScanState{}
 	for index := 0; index < len(raw); index++ {
+		ch := raw[index]
 		var err error
 		index, err = AdvanceSQLScanState(raw, index, &state)
 		if err != nil {
 			return nil, err
 		}
-		if !state.IsTopLevel() || raw[index] != ',' {
-			continue
+		if state.IsTopLevel() && ch == separator {
+			parts = append(parts, raw[start:index])
+			start = index + 1
 		}
-		parts = append(parts, strings.TrimSpace(raw[start:index]))
-		start = index + 1
 	}
 
-	last := strings.TrimSpace(raw[start:])
-	if last != "" {
-		parts = append(parts, last)
+	if !state.IsTopLevel() {
+		return nil, fmt.Errorf("unbalanced delimiters in SQL fragment")
 	}
 
+	parts = append(parts, raw[start:])
 	return parts, nil
+}
+
+// SplitTopLevelCSV splits a SQL fragment on commas that appear at the top level
+// (outside parentheses and quotes). Parts are trimmed and empty parts are dropped.
+func SplitTopLevelCSV(raw string) ([]string, error) {
+	parts, err := SplitTopLevel(raw, ',')
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			result = append(result, part)
+		}
+	}
+
+	return result, nil
 }
 
 // FindTrailingTopLevelParentheses finds the last top-level parenthesized group

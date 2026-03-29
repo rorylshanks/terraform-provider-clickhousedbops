@@ -186,7 +186,7 @@ func syncViewState(ctx context.Context, state *ViewResourceModel, view *dbops.Vi
 	if diags.HasError() {
 		return diags
 	}
-	if !columnSignaturesEqual(currentColumns, view.Columns) {
+	if !schemahelpers.ColumnSignaturesEqual(currentColumns, view.Columns) {
 		columns, columnDiags := schemahelpers.ColumnSignaturesValue(ctx, view.Columns)
 		diags.Append(columnDiags...)
 		if diags.HasError() {
@@ -198,16 +198,3 @@ func syncViewState(ctx context.Context, state *ViewResourceModel, view *dbops.Vi
 	return diags
 }
 
-func columnSignaturesEqual(left []dbops.Column, right []dbops.Column) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	for i := range left {
-		if left[i].Name != right[i].Name ||
-			left[i].Nullable != right[i].Nullable ||
-			strings.TrimSpace(left[i].Type) != strings.TrimSpace(right[i].Type) {
-			return false
-		}
-	}
-	return true
-}

@@ -10,6 +10,7 @@ import (
 	"github.com/ClickHouse/terraform-provider-clickhousedbops/internal/dbops"
 	"github.com/ClickHouse/terraform-provider-clickhousedbops/internal/querybuilder"
 	"github.com/ClickHouse/terraform-provider-clickhousedbops/internal/tableengine"
+	"github.com/ClickHouse/terraform-provider-clickhousedbops/pkg/resource/schemahelpers"
 )
 
 type plannedTableUpdate struct {
@@ -246,7 +247,7 @@ func planColumnUpdate(current dbops.Table, desired dbops.Table, strategy engineU
 		addedColumns: make(map[string]dbops.Column),
 	}
 
-	if columnsEqual(current.Columns, desired.Columns) {
+	if schemahelpers.ColumnsEqual(current.Columns, desired.Columns) {
 		return result, nil
 	}
 	if !strategy.allowColumnAlter {
@@ -546,7 +547,7 @@ func parseSettings(raw string) (parsedSettings, error) {
 		return settings, nil
 	}
 
-	parts, err := splitTopLevel(raw, ',')
+	parts, err := querybuilder.SplitTopLevel(raw, ',')
 	if err != nil {
 		return parsedSettings{}, err
 	}
@@ -564,7 +565,7 @@ func parseSettings(raw string) (parsedSettings, error) {
 			return parsedSettings{}, fmt.Errorf("unable to parse table setting %q", part)
 		}
 		assignment := settingAssignment{
-			Name:  normalizeIdentifier(name),
+			Name:  querybuilder.UnquoteIdentifier(name),
 			Value: normalizeSQL(value),
 		}
 		settings.ordered = append(settings.ordered, assignment)
@@ -640,7 +641,7 @@ func splitExpressionList(raw string) ([]string, error) {
 		return nil, nil
 	}
 	raw = unwrapOuterParens(raw)
-	parts, err := splitTopLevel(raw, ',')
+	parts, err := querybuilder.SplitTopLevel(raw, ',')
 	if err != nil {
 		return nil, err
 	}
@@ -654,41 +655,8 @@ func splitExpressionList(raw string) ([]string, error) {
 	return result, nil
 }
 
-func splitTopLevel(raw string, separator rune) ([]string, error) {
-	if normalizeSQL(raw) == "" {
-		return nil, nil
-	}
-
-	var (
-		parts []string
-		start int
-		state querybuilder.SQLScanState
-	)
-
-	for index := 0; index < len(raw); index++ {
-		ch := raw[index]
-		var err error
-		index, err = querybuilder.AdvanceSQLScanState(raw, index, &state)
-		if err != nil {
-			return nil, fmt.Errorf("unbalanced SQL fragment %q", raw)
-		}
-
-		if state.IsTopLevel() && rune(ch) == separator {
-			parts = append(parts, raw[start:index])
-			start = index + 1
-		}
-	}
-
-	if !state.IsTopLevel() {
-		return nil, fmt.Errorf("unbalanced SQL fragment %q", raw)
-	}
-
-	parts = append(parts, raw[start:])
-	return parts, nil
-}
-
-func splitTopLevelPair(raw string, separator rune) (string, string, bool, error) {
-	parts, err := splitTopLevel(raw, separator)
+func splitTopLevelPair(raw string, separator byte) (string, string, bool, error) {
+	parts, err := querybuilder.SplitTopLevel(raw, separator)
 	if err != nil {
 		return "", "", false, err
 	}
@@ -774,7 +742,7 @@ func extractIdentifiers(expression string) []string {
 	matches := identifierPattern.FindAllString(expression, -1)
 	result := make([]string, 0, len(matches))
 	for _, match := range matches {
-		result = append(result, normalizeIdentifier(match))
+		result = append(result, querybuilder.UnquoteIdentifier(match))
 	}
 	return result
 }
@@ -784,7 +752,7 @@ func simpleIdentifier(expression string) (string, bool) {
 	if expression == "" {
 		return "", false
 	}
-	unquoted := normalizeIdentifier(expression)
+	unquoted := querybuilder.UnquoteIdentifier(expression)
 	if unquoted == "" {
 		return "", false
 	}
@@ -816,50 +784,14 @@ func unwrapOuterParens(value string) string {
 	return normalizeSQL(value[1 : len(value)-1])
 }
 
-
-func normalizeIdentifier(value string) string {
-	value = normalizeSQL(value)
-	value = strings.Trim(value, "`")
-	return value
-}
-
 func normalizeSQL(value string) string {
 	return strings.TrimSpace(value)
-}
-
-func columnsEqual(left []dbops.Column, right []dbops.Column) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	for index := range left {
-		if !columnsExactlyEqual(left[index], right[index]) {
-			return false
-		}
-	}
-	return true
-}
-
-func columnsExactlyEqual(left dbops.Column, right dbops.Column) bool {
-	return left.Name == right.Name &&
-		left.Nullable == right.Nullable &&
-		normalizeSQL(left.Type) == normalizeSQL(right.Type) &&
-		normalizeSQL(left.Comment) == normalizeSQL(right.Comment) &&
-		normalizeOptionalString(left.DefaultExpression) == normalizeOptionalString(right.DefaultExpression) &&
-		normalizeOptionalString(left.MaterializedExpression) == normalizeOptionalString(right.MaterializedExpression) &&
-		normalizeOptionalString(left.AliasExpression) == normalizeOptionalString(right.AliasExpression)
 }
 
 func columnsEqualIgnoringName(left dbops.Column, right dbops.Column) bool {
 	left.Name = ""
 	right.Name = ""
-	return columnsExactlyEqual(left, right)
-}
-
-func normalizeOptionalString(value *string) string {
-	if value == nil {
-		return ""
-	}
-	return normalizeSQL(*value)
+	return schemahelpers.ColumnEqual(left, right)
 }
 
 func hasDuplicateColumnNames(columns []dbops.Column) bool {
