@@ -17,298 +17,145 @@ type ColumnDefinition struct {
 	AliasExpression        *string
 }
 
-type CreateTableQueryBuilder interface {
-	QueryBuilder
-	WithCluster(clusterName *string) CreateTableQueryBuilder
-	WithColumns(columns []ColumnDefinition) CreateTableQueryBuilder
-	WithEngine(engine string) CreateTableQueryBuilder
-	WithPartitionBy(partitionBy string) CreateTableQueryBuilder
-	WithOrderBy(orderBy string) CreateTableQueryBuilder
-	WithPrimaryKey(primaryKey string) CreateTableQueryBuilder
-	WithSampleBy(sampleBy string) CreateTableQueryBuilder
-	WithTTL(ttl string) CreateTableQueryBuilder
-	WithSettings(settings string) CreateTableQueryBuilder
-	WithAsSelect(query string) CreateTableQueryBuilder
+type CreateTableQuery struct {
+	Database    string
+	Name        string
+	ClusterName *string
+	Columns     []ColumnDefinition
+	Engine      string
+	PartitionBy string
+	OrderBy     string
+	PrimaryKey  string
+	SampleBy    string
+	TTL         string
+	Settings    string
+	AsSelect    string
 }
 
-type CreateViewQueryBuilder interface {
-	QueryBuilder
-	WithCluster(clusterName *string) CreateViewQueryBuilder
-	WithColumns(columns []ColumnDefinition) CreateViewQueryBuilder
-	WithQuery(query string) CreateViewQueryBuilder
+type CreateViewQuery struct {
+	Database    string
+	Name        string
+	ClusterName *string
+	Columns     []ColumnDefinition
+	Query       string
 }
 
-type CreateMaterializedViewQueryBuilder interface {
-	QueryBuilder
-	WithCluster(clusterName *string) CreateMaterializedViewQueryBuilder
-	WithColumns(columns []ColumnDefinition) CreateMaterializedViewQueryBuilder
-	WithEngine(engine string) CreateMaterializedViewQueryBuilder
-	WithPopulate(populate bool) CreateMaterializedViewQueryBuilder
-	WithToTable(table string) CreateMaterializedViewQueryBuilder
-	WithToColumns(columns []ColumnDefinition) CreateMaterializedViewQueryBuilder
-	WithQuery(query string) CreateMaterializedViewQueryBuilder
+type CreateMaterializedViewQuery struct {
+	Database    string
+	Name        string
+	ClusterName *string
+	Columns     []ColumnDefinition
+	Engine      string
+	Populate    bool
+	ToTable     string
+	ToColumns   []ColumnDefinition
+	Query       string
 }
 
-type createTableQueryBuilder struct {
-	database    string
-	name        string
-	clusterName *string
-	columns     []ColumnDefinition
-	engine      *string
-	partitionBy *string
-	orderBy     *string
-	primaryKey  *string
-	sampleBy    *string
-	ttl         *string
-	settings    *string
-	asSelect    *string
-}
-
-type createViewQueryBuilder struct {
-	database    string
-	name        string
-	clusterName *string
-	columns     []ColumnDefinition
-	query       *string
-}
-
-type createMaterializedViewQueryBuilder struct {
-	database    string
-	name        string
-	clusterName *string
-	columns     []ColumnDefinition
-	engine      *string
-	populate    bool
-	toTable     *string
-	toColumns   []ColumnDefinition
-	query       *string
-}
-
-func NewCreateTable(database string, name string) CreateTableQueryBuilder {
-	return &createTableQueryBuilder{
-		database: database,
-		name:     name,
-	}
-}
-
-func NewCreateView(database string, name string) CreateViewQueryBuilder {
-	return &createViewQueryBuilder{
-		database: database,
-		name:     name,
-	}
-}
-
-func NewCreateMaterializedView(database string, name string) CreateMaterializedViewQueryBuilder {
-	return &createMaterializedViewQueryBuilder{
-		database: database,
-		name:     name,
-	}
-}
-
-func (q *createTableQueryBuilder) WithCluster(clusterName *string) CreateTableQueryBuilder {
-	q.clusterName = clusterName
-	return q
-}
-
-func (q *createTableQueryBuilder) WithColumns(columns []ColumnDefinition) CreateTableQueryBuilder {
-	q.columns = columns
-	return q
-}
-
-func (q *createTableQueryBuilder) WithEngine(engine string) CreateTableQueryBuilder {
-	q.engine = &engine
-	return q
-}
-
-func (q *createTableQueryBuilder) WithPartitionBy(partitionBy string) CreateTableQueryBuilder {
-	q.partitionBy = &partitionBy
-	return q
-}
-
-func (q *createTableQueryBuilder) WithOrderBy(orderBy string) CreateTableQueryBuilder {
-	q.orderBy = &orderBy
-	return q
-}
-
-func (q *createTableQueryBuilder) WithPrimaryKey(primaryKey string) CreateTableQueryBuilder {
-	q.primaryKey = &primaryKey
-	return q
-}
-
-func (q *createTableQueryBuilder) WithSampleBy(sampleBy string) CreateTableQueryBuilder {
-	q.sampleBy = &sampleBy
-	return q
-}
-
-func (q *createTableQueryBuilder) WithTTL(ttl string) CreateTableQueryBuilder {
-	q.ttl = &ttl
-	return q
-}
-
-func (q *createTableQueryBuilder) WithSettings(settings string) CreateTableQueryBuilder {
-	q.settings = &settings
-	return q
-}
-
-func (q *createTableQueryBuilder) WithAsSelect(query string) CreateTableQueryBuilder {
-	q.asSelect = &query
-	return q
-}
-
-func (q *createTableQueryBuilder) Build() (string, error) {
-	if err := validateRequiredField(q.database, "database", "CREATE TABLE"); err != nil {
+func (q CreateTableQuery) Build() (string, error) {
+	if err := validateRequiredField(q.Database, "database", "CREATE TABLE"); err != nil {
 		return "", err
 	}
-	if err := validateRequiredField(q.name, "name", "CREATE TABLE"); err != nil {
+	if err := validateRequiredField(q.Name, "name", "CREATE TABLE"); err != nil {
 		return "", err
 	}
-	if q.engine == nil || strings.TrimSpace(*q.engine) == "" {
+	if strings.TrimSpace(q.Engine) == "" {
 		return "", errors.New("engine cannot be empty for CREATE TABLE queries")
 	}
-	if len(q.columns) == 0 && isNilOrEmpty(q.asSelect) {
+	if len(q.Columns) == 0 && strings.TrimSpace(q.AsSelect) == "" {
 		return "", errors.New("CREATE TABLE queries require at least one column or an as_select query")
 	}
 
 	tokens := []string{
 		"CREATE",
 		"TABLE",
-		qualifiedIdentifier(q.database, q.name),
+		qualifiedIdentifier(q.Database, q.Name),
 	}
-	tokens = appendClusterClause(tokens, q.clusterName)
-	if len(q.columns) > 0 {
-		definitions, err := buildColumnDefinitions(q.columns)
+	tokens = appendClusterClause(tokens, q.ClusterName)
+	if len(q.Columns) > 0 {
+		definitions, err := buildColumnDefinitions(q.Columns)
 		if err != nil {
 			return "", err
 		}
 		tokens = append(tokens, fmt.Sprintf("(%s)", strings.Join(definitions, ", ")))
 	}
 
-	tokens = append(tokens, "ENGINE", "=", strings.TrimSpace(*q.engine))
+	tokens = append(tokens, "ENGINE", "=", strings.TrimSpace(q.Engine))
 
-	if !isNilOrEmpty(q.partitionBy) {
-		tokens = append(tokens, "PARTITION BY", strings.TrimSpace(*q.partitionBy))
+	if strings.TrimSpace(q.PartitionBy) != "" {
+		tokens = append(tokens, "PARTITION BY", strings.TrimSpace(q.PartitionBy))
 	}
-	if !isNilOrEmpty(q.orderBy) {
-		tokens = append(tokens, "ORDER BY", strings.TrimSpace(*q.orderBy))
+	if strings.TrimSpace(q.OrderBy) != "" {
+		tokens = append(tokens, "ORDER BY", strings.TrimSpace(q.OrderBy))
 	}
-	if !isNilOrEmpty(q.primaryKey) {
-		tokens = append(tokens, "PRIMARY KEY", strings.TrimSpace(*q.primaryKey))
+	if strings.TrimSpace(q.PrimaryKey) != "" {
+		tokens = append(tokens, "PRIMARY KEY", strings.TrimSpace(q.PrimaryKey))
 	}
-	if !isNilOrEmpty(q.sampleBy) {
-		tokens = append(tokens, "SAMPLE BY", strings.TrimSpace(*q.sampleBy))
+	if strings.TrimSpace(q.SampleBy) != "" {
+		tokens = append(tokens, "SAMPLE BY", strings.TrimSpace(q.SampleBy))
 	}
-	if !isNilOrEmpty(q.ttl) {
-		tokens = append(tokens, "TTL", strings.TrimSpace(*q.ttl))
+	if strings.TrimSpace(q.TTL) != "" {
+		tokens = append(tokens, "TTL", strings.TrimSpace(q.TTL))
 	}
-	if !isNilOrEmpty(q.settings) {
-		tokens = append(tokens, "SETTINGS", strings.TrimSpace(*q.settings))
+	if strings.TrimSpace(q.Settings) != "" {
+		tokens = append(tokens, "SETTINGS", strings.TrimSpace(q.Settings))
 	}
-	if !isNilOrEmpty(q.asSelect) {
-		tokens = append(tokens, "AS", strings.TrimSpace(*q.asSelect))
+	if strings.TrimSpace(q.AsSelect) != "" {
+		tokens = append(tokens, "AS", strings.TrimSpace(q.AsSelect))
 	}
 
 	return strings.Join(tokens, " ") + ";", nil
 }
 
-func (q *createViewQueryBuilder) WithCluster(clusterName *string) CreateViewQueryBuilder {
-	q.clusterName = clusterName
-	return q
-}
-
-func (q *createViewQueryBuilder) WithColumns(columns []ColumnDefinition) CreateViewQueryBuilder {
-	q.columns = columns
-	return q
-}
-
-func (q *createViewQueryBuilder) WithQuery(query string) CreateViewQueryBuilder {
-	q.query = &query
-	return q
-}
-
-func (q *createViewQueryBuilder) Build() (string, error) {
-	if err := validateRequiredField(q.database, "database", "CREATE VIEW"); err != nil {
+func (q CreateViewQuery) Build() (string, error) {
+	if err := validateRequiredField(q.Database, "database", "CREATE VIEW"); err != nil {
 		return "", err
 	}
-	if err := validateRequiredField(q.name, "name", "CREATE VIEW"); err != nil {
+	if err := validateRequiredField(q.Name, "name", "CREATE VIEW"); err != nil {
 		return "", err
 	}
-	if isNilOrEmpty(q.query) {
+	if strings.TrimSpace(q.Query) == "" {
 		return "", errors.New("query cannot be empty for CREATE VIEW queries")
 	}
 
 	tokens := []string{
 		"CREATE",
 		"VIEW",
-		qualifiedIdentifier(q.database, q.name),
+		qualifiedIdentifier(q.Database, q.Name),
 	}
-	tokens = appendClusterClause(tokens, q.clusterName)
-	if len(q.columns) > 0 {
-		signature, err := buildColumnSignatures(q.columns)
+	tokens = appendClusterClause(tokens, q.ClusterName)
+	if len(q.Columns) > 0 {
+		signature, err := buildColumnSignatures(q.Columns)
 		if err != nil {
 			return "", err
 		}
 		tokens = append(tokens, fmt.Sprintf("(%s)", strings.Join(signature, ", ")))
 	}
-	tokens = append(tokens, "AS", strings.TrimSpace(*q.query))
+	tokens = append(tokens, "AS", strings.TrimSpace(q.Query))
 
 	return strings.Join(tokens, " ") + ";", nil
 }
 
-func (q *createMaterializedViewQueryBuilder) WithCluster(clusterName *string) CreateMaterializedViewQueryBuilder {
-	q.clusterName = clusterName
-	return q
-}
-
-func (q *createMaterializedViewQueryBuilder) WithColumns(columns []ColumnDefinition) CreateMaterializedViewQueryBuilder {
-	q.columns = columns
-	return q
-}
-
-func (q *createMaterializedViewQueryBuilder) WithEngine(engine string) CreateMaterializedViewQueryBuilder {
-	q.engine = &engine
-	return q
-}
-
-func (q *createMaterializedViewQueryBuilder) WithPopulate(populate bool) CreateMaterializedViewQueryBuilder {
-	q.populate = populate
-	return q
-}
-
-func (q *createMaterializedViewQueryBuilder) WithToTable(table string) CreateMaterializedViewQueryBuilder {
-	q.toTable = &table
-	return q
-}
-
-func (q *createMaterializedViewQueryBuilder) WithToColumns(columns []ColumnDefinition) CreateMaterializedViewQueryBuilder {
-	q.toColumns = columns
-	return q
-}
-
-func (q *createMaterializedViewQueryBuilder) WithQuery(query string) CreateMaterializedViewQueryBuilder {
-	q.query = &query
-	return q
-}
-
-func (q *createMaterializedViewQueryBuilder) Build() (string, error) {
-	if err := validateRequiredField(q.database, "database", "CREATE MATERIALIZED VIEW"); err != nil {
+func (q CreateMaterializedViewQuery) Build() (string, error) {
+	if err := validateRequiredField(q.Database, "database", "CREATE MATERIALIZED VIEW"); err != nil {
 		return "", err
 	}
-	if err := validateRequiredField(q.name, "name", "CREATE MATERIALIZED VIEW"); err != nil {
+	if err := validateRequiredField(q.Name, "name", "CREATE MATERIALIZED VIEW"); err != nil {
 		return "", err
 	}
-	if isNilOrEmpty(q.query) {
+	if strings.TrimSpace(q.Query) == "" {
 		return "", errors.New("query cannot be empty for CREATE MATERIALIZED VIEW queries")
 	}
 
-	hasToTable := !isNilOrEmpty(q.toTable)
-	hasEngine := !isNilOrEmpty(q.engine)
+	hasToTable := strings.TrimSpace(q.ToTable) != ""
+	hasEngine := strings.TrimSpace(q.Engine) != ""
 	if hasToTable == hasEngine {
 		return "", errors.New("CREATE MATERIALIZED VIEW queries require exactly one of to_table or engine")
 	}
-	if !hasToTable && len(q.toColumns) > 0 {
+	if !hasToTable && len(q.ToColumns) > 0 {
 		return "", errors.New("to_columns can only be set when to_table is set")
 	}
-	if hasToTable && len(q.columns) > 0 {
+	if hasToTable && len(q.Columns) > 0 {
 		return "", errors.New("columns can only be set for engine-backed materialized views")
 	}
 
@@ -316,20 +163,20 @@ func (q *createMaterializedViewQueryBuilder) Build() (string, error) {
 		"CREATE",
 		"MATERIALIZED",
 		"VIEW",
-		qualifiedIdentifier(q.database, q.name),
+		qualifiedIdentifier(q.Database, q.Name),
 	}
-	tokens = appendClusterClause(tokens, q.clusterName)
-	if len(q.columns) > 0 {
-		definitions, err := buildColumnDefinitions(q.columns)
+	tokens = appendClusterClause(tokens, q.ClusterName)
+	if len(q.Columns) > 0 {
+		definitions, err := buildColumnDefinitions(q.Columns)
 		if err != nil {
 			return "", err
 		}
 		tokens = append(tokens, fmt.Sprintf("(%s)", strings.Join(definitions, ", ")))
 	}
 	if hasToTable {
-		tokens = append(tokens, "TO", rawOrQualifiedIdentifier(strings.TrimSpace(*q.toTable)))
-		if len(q.toColumns) > 0 {
-			signature, err := buildColumnSignatures(q.toColumns)
+		tokens = append(tokens, "TO", rawOrQualifiedIdentifier(strings.TrimSpace(q.ToTable)))
+		if len(q.ToColumns) > 0 {
+			signature, err := buildColumnSignatures(q.ToColumns)
 			if err != nil {
 				return "", err
 			}
@@ -337,12 +184,12 @@ func (q *createMaterializedViewQueryBuilder) Build() (string, error) {
 		}
 	}
 	if hasEngine {
-		tokens = append(tokens, "ENGINE", "=", strings.TrimSpace(*q.engine))
+		tokens = append(tokens, "ENGINE", "=", strings.TrimSpace(q.Engine))
 	}
-	if q.populate {
+	if q.Populate {
 		tokens = append(tokens, "POPULATE")
 	}
-	tokens = append(tokens, "AS", strings.TrimSpace(*q.query))
+	tokens = append(tokens, "AS", strings.TrimSpace(q.Query))
 
 	return strings.Join(tokens, " ") + ";", nil
 }
@@ -389,4 +236,3 @@ func typeSQL(rawType string, nullable bool, label string) (string, error) {
 
 	return t, nil
 }
-

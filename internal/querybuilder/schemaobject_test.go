@@ -7,19 +7,21 @@ func Test_createTable(t *testing.T) {
 	comment := "event name"
 	defaultExpr := "now()"
 
-	got, err := NewCreateTable("posthog", "events").
-		WithCluster(&clusterName).
-		WithColumns([]ColumnDefinition{
+	got, err := CreateTableQuery{
+		Database:    "posthog",
+		Name:        "events",
+		ClusterName: &clusterName,
+		Columns: []ColumnDefinition{
 			{Name: "team_id", Type: "UInt64"},
 			{Name: "event", Type: "String", Comment: &comment},
 			{Name: "created_at", Type: "DateTime", DefaultExpression: &defaultExpr},
 			{Name: "browser", Type: "String", Nullable: true},
-		}).
-		WithEngine("MergeTree()").
-		WithPartitionBy("toYYYYMM(created_at)").
-		WithOrderBy("(team_id, created_at)").
-		WithSettings("index_granularity = 8192").
-		Build()
+		},
+		Engine:      "MergeTree()",
+		PartitionBy: "toYYYYMM(created_at)",
+		OrderBy:     "(team_id, created_at)",
+		Settings:    "index_granularity = 8192",
+	}.Build()
 	if err != nil {
 		t.Fatalf("Build() error = %v", err)
 	}
@@ -31,13 +33,15 @@ func Test_createTable(t *testing.T) {
 }
 
 func Test_createTableWithKafkaEngine(t *testing.T) {
-	got, err := NewCreateTable("posthog", "kafka_events").
-		WithColumns([]ColumnDefinition{
+	got, err := CreateTableQuery{
+		Database: "posthog",
+		Name:     "kafka_events",
+		Columns: []ColumnDefinition{
 			{Name: "event", Type: "String"},
-		}).
-		WithEngine("Kafka('redpanda:9092', 'events', 'events_consumer', 'JSONEachRow')").
-		WithSettings("kafka_num_consumers = 1").
-		Build()
+		},
+		Engine:   "Kafka('redpanda:9092', 'events', 'events_consumer', 'JSONEachRow')",
+		Settings: "kafka_num_consumers = 1",
+	}.Build()
 	if err != nil {
 		t.Fatalf("Build() error = %v", err)
 	}
@@ -52,17 +56,19 @@ func Test_createTableRejectsMultipleColumnExpressions(t *testing.T) {
 	defaultExpr := "now()"
 	aliasExpr := "created_at"
 
-	_, err := NewCreateTable("posthog", "events").
-		WithColumns([]ColumnDefinition{
+	_, err := CreateTableQuery{
+		Database: "posthog",
+		Name:     "events",
+		Columns: []ColumnDefinition{
 			{
 				Name:              "created_at",
 				Type:              "DateTime",
 				DefaultExpression: &defaultExpr,
 				AliasExpression:   &aliasExpr,
 			},
-		}).
-		WithEngine("MergeTree()").
-		Build()
+		},
+		Engine: "MergeTree()",
+	}.Build()
 	if err == nil {
 		t.Fatal("expected Build() to fail when multiple column expressions are set")
 	}
@@ -106,13 +112,15 @@ func Test_modifySettingAction(t *testing.T) {
 }
 
 func Test_createView(t *testing.T) {
-	got, err := NewCreateView("posthog", "team_event_counts").
-		WithColumns([]ColumnDefinition{
+	got, err := CreateViewQuery{
+		Database: "posthog",
+		Name:     "team_event_counts",
+		Columns: []ColumnDefinition{
 			{Name: "team_id", Type: "UInt64"},
 			{Name: "event_count", Type: "UInt64"},
-		}).
-		WithQuery("SELECT team_id, count() AS event_count FROM posthog.events GROUP BY team_id").
-		Build()
+		},
+		Query: "SELECT team_id, count() AS event_count FROM posthog.events GROUP BY team_id",
+	}.Build()
 	if err != nil {
 		t.Fatalf("Build() error = %v", err)
 	}
@@ -124,15 +132,17 @@ func Test_createView(t *testing.T) {
 }
 
 func Test_createMaterializedViewToTable(t *testing.T) {
-	got, err := NewCreateMaterializedView("posthog", "events_mv").
-		WithToTable("posthog.daily_event_counts").
-		WithToColumns([]ColumnDefinition{
+	got, err := CreateMaterializedViewQuery{
+		Database: "posthog",
+		Name:     "events_mv",
+		ToTable:  "posthog.daily_event_counts",
+		ToColumns: []ColumnDefinition{
 			{Name: "team_id", Type: "UInt64"},
 			{Name: "event_date", Type: "Date"},
 			{Name: "event_count", Type: "UInt64"},
-		}).
-		WithQuery("SELECT team_id, toDate(created_at) AS event_date, count() AS event_count FROM posthog.events GROUP BY team_id, event_date").
-		Build()
+		},
+		Query: "SELECT team_id, toDate(created_at) AS event_date, count() AS event_count FROM posthog.events GROUP BY team_id, event_date",
+	}.Build()
 	if err != nil {
 		t.Fatalf("Build() error = %v", err)
 	}
@@ -144,24 +154,28 @@ func Test_createMaterializedViewToTable(t *testing.T) {
 }
 
 func Test_createMaterializedViewRequiresExactlyOneTargetMode(t *testing.T) {
-	_, err := NewCreateMaterializedView("posthog", "events_mv").
-		WithEngine("MergeTree()").
-		WithToTable("posthog.daily_event_counts").
-		WithQuery("SELECT 1").
-		Build()
+	_, err := CreateMaterializedViewQuery{
+		Database: "posthog",
+		Name:     "events_mv",
+		Engine:   "MergeTree()",
+		ToTable:  "posthog.daily_event_counts",
+		Query:    "SELECT 1",
+	}.Build()
 	if err == nil {
 		t.Fatal("expected Build() to fail when both engine and to_table are set")
 	}
 }
 
 func Test_createMaterializedViewRejectsColumnsWithToTable(t *testing.T) {
-	_, err := NewCreateMaterializedView("posthog", "events_mv").
-		WithColumns([]ColumnDefinition{
+	_, err := CreateMaterializedViewQuery{
+		Database: "posthog",
+		Name:     "events_mv",
+		Columns: []ColumnDefinition{
 			{Name: "team_id", Type: "UInt64"},
-		}).
-		WithToTable("posthog.daily_event_counts").
-		WithQuery("SELECT 1").
-		Build()
+		},
+		ToTable: "posthog.daily_event_counts",
+		Query:   "SELECT 1",
+	}.Build()
 	if err == nil {
 		t.Fatal("expected Build() to fail when columns are set for a TO-backed materialized view")
 	}

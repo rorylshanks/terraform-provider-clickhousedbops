@@ -1,6 +1,10 @@
 package dbops
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/ClickHouse/terraform-provider-clickhousedbops/internal/querybuilder"
+)
 
 func TestParseCreateTableDefinition(t *testing.T) {
 	definition, err := parseCreateTableDefinition("CREATE TABLE drift_test.events (`id` UInt64, `ts` DateTime DEFAULT now(), `extra` UInt64 ALIAS id) ENGINE = MergeTree PARTITION BY toYYYYMM(ts) ORDER BY (id, ts) SAMPLE BY id TTL ts + toIntervalDay(1) SETTINGS ttl_only_drop_parts = 1, index_granularity = 8192 AS SELECT * FROM drift_test.source")
@@ -54,9 +58,9 @@ func TestUnwrapNullableType(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotType, gotNullable := unwrapNullableType(tt.raw)
+			gotType, gotNullable := querybuilder.UnwrapNullableType(tt.raw)
 			if gotType != tt.wantType || gotNullable != tt.wantNullable {
-				t.Fatalf("unwrapNullableType() got (%q, %t), want (%q, %t)", gotType, gotNullable, tt.wantType, tt.wantNullable)
+				t.Fatalf("querybuilder.UnwrapNullableType() got (%q, %t), want (%q, %t)", gotType, gotNullable, tt.wantType, tt.wantNullable)
 			}
 		})
 	}
@@ -219,6 +223,12 @@ func TestParseCreateMaterializedViewDefinition_ToTable(t *testing.T) {
 	if definition.Engine != "" {
 		t.Fatalf("expected empty engine for TO-table MV, got %q", definition.Engine)
 	}
+	if definition.Populate {
+		t.Fatal("expected populate to be false for TO-table MV")
+	}
+	if len(definition.ToColumns) != 0 {
+		t.Fatalf("expected no to_columns, got %#v", definition.ToColumns)
+	}
 }
 
 func TestParseCreateMaterializedViewDefinition_EngineBacked(t *testing.T) {
@@ -235,6 +245,9 @@ func TestParseCreateMaterializedViewDefinition_EngineBacked(t *testing.T) {
 	}
 	if definition.ToTable != "" {
 		t.Fatalf("expected empty to_table for engine-backed MV, got %q", definition.ToTable)
+	}
+	if definition.Populate {
+		t.Fatal("expected populate to be false")
 	}
 	if len(definition.Columns) != 2 {
 		t.Fatalf("expected 2 columns, got %d", len(definition.Columns))
@@ -277,5 +290,37 @@ func TestParseCreateMaterializedViewDefinition_WithColumns(t *testing.T) {
 	}
 	if definition.Query != "SELECT user_id, name FROM mydb.users" {
 		t.Fatalf("unexpected query: %q", definition.Query)
+	}
+}
+
+func TestParseCreateMaterializedViewDefinition_ToColumnsAndPopulate(t *testing.T) {
+	stmt := "CREATE MATERIALIZED VIEW `mydb`.`mv` TO mydb.target (`user_id` UInt64, `name` Nullable(String)) AS SELECT user_id, name FROM mydb.users"
+	definition, err := parseCreateMaterializedViewDefinition(stmt)
+	if err != nil {
+		t.Fatalf("parseCreateMaterializedViewDefinition() error = %v", err)
+	}
+	if definition.ToTable != "mydb.target" {
+		t.Fatalf("unexpected to_table: %q", definition.ToTable)
+	}
+	if len(definition.ToColumns) != 2 {
+		t.Fatalf("expected 2 to_columns, got %#v", definition.ToColumns)
+	}
+	if definition.ToColumns[0] != (Column{Name: "user_id", Type: "UInt64", Nullable: false}) {
+		t.Fatalf("unexpected first to_column: %#v", definition.ToColumns[0])
+	}
+	if definition.ToColumns[1] != (Column{Name: "name", Type: "String", Nullable: true}) {
+		t.Fatalf("unexpected second to_column: %#v", definition.ToColumns[1])
+	}
+
+	stmt = "CREATE MATERIALIZED VIEW `mydb`.`mv` (`id` UInt64) ENGINE = MergeTree() ORDER BY id POPULATE AS SELECT id FROM mydb.source"
+	definition, err = parseCreateMaterializedViewDefinition(stmt)
+	if err != nil {
+		t.Fatalf("parseCreateMaterializedViewDefinition() error = %v", err)
+	}
+	if !definition.Populate {
+		t.Fatal("expected populate to be parsed")
+	}
+	if definition.Engine != "MergeTree() ORDER BY id" {
+		t.Fatalf("unexpected engine: %q", definition.Engine)
 	}
 }

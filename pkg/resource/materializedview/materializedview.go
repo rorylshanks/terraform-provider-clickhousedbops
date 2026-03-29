@@ -241,6 +241,10 @@ func syncMaterializedViewState(ctx context.Context, state *MaterializedViewResou
 		state.ToTable = types.StringValue(view.ToTable)
 	}
 
+	if view.Populate || (!state.Populate.IsNull() && !state.Populate.IsUnknown()) {
+		state.Populate = types.BoolValue(view.Populate)
+	}
+
 	// Sync columns for engine-backed materialized views
 	if len(view.Columns) > 0 || (!state.Columns.IsNull() && !state.Columns.IsUnknown()) {
 		columns, columnDiags := schemahelpers.ColumnsValue(ctx, view.Columns)

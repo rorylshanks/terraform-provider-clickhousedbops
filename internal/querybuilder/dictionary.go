@@ -18,118 +18,48 @@ type DictionaryAttributeDefinition struct {
 	IsObjectID        bool
 }
 
-type CreateDictionaryQueryBuilder interface {
-	QueryBuilder
-	WithCluster(clusterName *string) CreateDictionaryQueryBuilder
-	WithAttributes(attributes []DictionaryAttributeDefinition) CreateDictionaryQueryBuilder
-	WithPrimaryKey(primaryKey []string) CreateDictionaryQueryBuilder
-	WithSource(source string) CreateDictionaryQueryBuilder
-	WithLayout(layout string) CreateDictionaryQueryBuilder
-	WithLifetime(lifetime string) CreateDictionaryQueryBuilder
-	WithSettings(settings string) CreateDictionaryQueryBuilder
-	WithComment(comment string) CreateDictionaryQueryBuilder
+type CreateDictionaryQuery struct {
+	Database    string
+	Name        string
+	ClusterName *string
+	Attributes  []DictionaryAttributeDefinition
+	PrimaryKey  []string
+	Source      string
+	Layout      string
+	Lifetime    string
+	Settings    string
+	Comment     string
 }
 
-type ShowCreateDictionaryQueryBuilder interface {
-	QueryBuilder
+type ShowCreateDictionaryQuery struct {
+	Database string
+	Name     string
 }
 
-type createDictionaryQueryBuilder struct {
-	database    string
-	name        string
-	clusterName *string
-	attributes  []DictionaryAttributeDefinition
-	primaryKey  []string
-	source      *string
-	layout      *string
-	lifetime    *string
-	settings    *string
-	comment     *string
-}
-
-type showCreateDictionaryQueryBuilder struct {
-	database string
-	name     string
-}
-
-func NewCreateDictionary(database string, name string) CreateDictionaryQueryBuilder {
-	return &createDictionaryQueryBuilder{
-		database: database,
-		name:     name,
-	}
-}
-
-func NewShowCreateDictionary(database string, name string) ShowCreateDictionaryQueryBuilder {
-	return &showCreateDictionaryQueryBuilder{
-		database: database,
-		name:     name,
-	}
-}
-
-func (q *createDictionaryQueryBuilder) WithCluster(clusterName *string) CreateDictionaryQueryBuilder {
-	q.clusterName = clusterName
-	return q
-}
-
-func (q *createDictionaryQueryBuilder) WithAttributes(attributes []DictionaryAttributeDefinition) CreateDictionaryQueryBuilder {
-	q.attributes = attributes
-	return q
-}
-
-func (q *createDictionaryQueryBuilder) WithPrimaryKey(primaryKey []string) CreateDictionaryQueryBuilder {
-	q.primaryKey = primaryKey
-	return q
-}
-
-func (q *createDictionaryQueryBuilder) WithSource(source string) CreateDictionaryQueryBuilder {
-	q.source = &source
-	return q
-}
-
-func (q *createDictionaryQueryBuilder) WithLayout(layout string) CreateDictionaryQueryBuilder {
-	q.layout = &layout
-	return q
-}
-
-func (q *createDictionaryQueryBuilder) WithLifetime(lifetime string) CreateDictionaryQueryBuilder {
-	q.lifetime = &lifetime
-	return q
-}
-
-func (q *createDictionaryQueryBuilder) WithSettings(settings string) CreateDictionaryQueryBuilder {
-	q.settings = &settings
-	return q
-}
-
-func (q *createDictionaryQueryBuilder) WithComment(comment string) CreateDictionaryQueryBuilder {
-	q.comment = &comment
-	return q
-}
-
-func (q *createDictionaryQueryBuilder) Build() (string, error) {
-	if err := validateRequiredField(q.database, "database", "CREATE DICTIONARY"); err != nil {
+func (q CreateDictionaryQuery) Build() (string, error) {
+	if err := validateRequiredField(q.Database, "database", "CREATE DICTIONARY"); err != nil {
 		return "", err
 	}
-	if err := validateRequiredField(q.name, "name", "CREATE DICTIONARY"); err != nil {
+	if err := validateRequiredField(q.Name, "name", "CREATE DICTIONARY"); err != nil {
 		return "", err
 	}
-	if len(q.attributes) == 0 {
+	if len(q.Attributes) == 0 {
 		return "", errors.New("CREATE DICTIONARY queries require at least one attribute")
 	}
-	if len(q.primaryKey) == 0 {
+	if len(q.PrimaryKey) == 0 {
 		return "", errors.New("CREATE DICTIONARY queries require at least one primary key attribute")
 	}
-	if isNilOrEmpty(q.source) {
+	if strings.TrimSpace(q.Source) == "" {
 		return "", errors.New("source cannot be empty for CREATE DICTIONARY queries")
 	}
-	if isNilOrEmpty(q.layout) {
+	if strings.TrimSpace(q.Layout) == "" {
 		return "", errors.New("layout cannot be empty for CREATE DICTIONARY queries")
 	}
-	if isNilOrEmpty(q.lifetime) {
+	if strings.TrimSpace(q.Lifetime) == "" {
 		return "", errors.New("lifetime cannot be empty for CREATE DICTIONARY queries")
 	}
 
-	attributeDefinitions, err := buildDictionaryAttributeDefinitions(q.attributes)
+	attributeDefinitions, err := buildDictionaryAttributeDefinitions(q.Attributes)
 	if err != nil {
 		return "", err
 	}
@@ -137,38 +67,38 @@ func (q *createDictionaryQueryBuilder) Build() (string, error) {
 	tokens := []string{
 		"CREATE",
 		"DICTIONARY",
-		qualifiedIdentifier(q.database, q.name),
+		qualifiedIdentifier(q.Database, q.Name),
 	}
-	tokens = appendClusterClause(tokens, q.clusterName)
+	tokens = appendClusterClause(tokens, q.ClusterName)
 
 	tokens = append(tokens,
 		fmt.Sprintf("(%s)", strings.Join(attributeDefinitions, ", ")),
 		"PRIMARY KEY",
-		strings.Join(backtickAll(q.primaryKey), ", "),
-		fmt.Sprintf("SOURCE(%s)", strings.TrimSpace(*q.source)),
-		fmt.Sprintf("LAYOUT(%s)", strings.TrimSpace(*q.layout)),
-		fmt.Sprintf("LIFETIME(%s)", strings.TrimSpace(*q.lifetime)),
+		strings.Join(backtickAll(q.PrimaryKey), ", "),
+		fmt.Sprintf("SOURCE(%s)", strings.TrimSpace(q.Source)),
+		fmt.Sprintf("LAYOUT(%s)", strings.TrimSpace(q.Layout)),
+		fmt.Sprintf("LIFETIME(%s)", strings.TrimSpace(q.Lifetime)),
 	)
 
-	if !isNilOrEmpty(q.settings) {
-		tokens = append(tokens, "SETTINGS", strings.TrimSpace(*q.settings))
+	if strings.TrimSpace(q.Settings) != "" {
+		tokens = append(tokens, "SETTINGS", strings.TrimSpace(q.Settings))
 	}
-	if !isNilOrEmpty(q.comment) {
-		tokens = append(tokens, "COMMENT", quote(strings.TrimSpace(*q.comment)))
+	if strings.TrimSpace(q.Comment) != "" {
+		tokens = append(tokens, "COMMENT", quote(strings.TrimSpace(q.Comment)))
 	}
 
 	return strings.Join(tokens, " ") + ";", nil
 }
 
-func (q *showCreateDictionaryQueryBuilder) Build() (string, error) {
-	if err := validateRequiredField(q.database, "database", "SHOW CREATE DICTIONARY"); err != nil {
+func (q ShowCreateDictionaryQuery) Build() (string, error) {
+	if err := validateRequiredField(q.Database, "database", "SHOW CREATE DICTIONARY"); err != nil {
 		return "", err
 	}
-	if err := validateRequiredField(q.name, "name", "SHOW CREATE DICTIONARY"); err != nil {
+	if err := validateRequiredField(q.Name, "name", "SHOW CREATE DICTIONARY"); err != nil {
 		return "", err
 	}
 
-	return fmt.Sprintf("SHOW CREATE DICTIONARY %s;", qualifiedIdentifier(q.database, q.name)), nil
+	return fmt.Sprintf("SHOW CREATE DICTIONARY %s;", qualifiedIdentifier(q.Database, q.Name)), nil
 }
 
 func buildDictionaryAttributeDefinitions(attributes []DictionaryAttributeDefinition) ([]string, error) {

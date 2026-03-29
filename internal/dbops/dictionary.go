@@ -35,22 +35,18 @@ type Dictionary struct {
 }
 
 func (i *impl) CreateDictionary(ctx context.Context, dictionary Dictionary, clusterName *string) (*Dictionary, error) {
-	builder := querybuilder.NewCreateDictionary(dictionary.Database, dictionary.Name).
-		WithCluster(clusterName).
-		WithAttributes(toQueryBuilderDictionaryAttributes(dictionary.Attributes)).
-		WithPrimaryKey(dictionary.PrimaryKey).
-		WithSource(dictionary.Source).
-		WithLayout(dictionary.Layout).
-		WithLifetime(dictionary.Lifetime)
-
-	if dictionary.Settings != "" {
-		builder = builder.WithSettings(dictionary.Settings)
-	}
-	if dictionary.Comment != "" {
-		builder = builder.WithComment(dictionary.Comment)
-	}
-
-	sql, err := builder.Build()
+	sql, err := querybuilder.CreateDictionaryQuery{
+		Database:    dictionary.Database,
+		Name:        dictionary.Name,
+		ClusterName: clusterName,
+		Attributes:  toQueryBuilderDictionaryAttributes(dictionary.Attributes),
+		PrimaryKey:  dictionary.PrimaryKey,
+		Source:      dictionary.Source,
+		Layout:      dictionary.Layout,
+		Lifetime:    dictionary.Lifetime,
+		Settings:    dictionary.Settings,
+		Comment:     dictionary.Comment,
+	}.Build()
 	if err != nil {
 		return nil, errors.WithMessage(err, "error building query")
 	}
@@ -112,7 +108,7 @@ func (i *impl) GetDictionary(ctx context.Context, database string, name string, 
 		return nil, nil
 	}
 
-	showCreateSQL, err := querybuilder.NewShowCreateDictionary(database, name).Build()
+	showCreateSQL, err := querybuilder.ShowCreateDictionaryQuery{Database: database, Name: name}.Build()
 	if err != nil {
 		return nil, errors.WithMessage(err, "error building query")
 	}
@@ -216,14 +212,14 @@ func parseCreateDictionaryDefinition(createStatement string) (createDictionaryDe
 	}
 
 	// PRIMARY KEY
-	pkIndex, err := findTopLevelKeyword(remainder, "PRIMARY KEY", 0)
+	pkIndex, err := querybuilder.FindTopLevelKeyword(remainder, "PRIMARY KEY", 0)
 	if err != nil {
 		return definition, err
 	}
 	if pkIndex != -1 {
 		pkValue := remainder[pkIndex+len("PRIMARY KEY"):]
 		// PRIMARY KEY value ends at SOURCE
-		srcIndex, err := findTopLevelKeyword(pkValue, "SOURCE", 0)
+		srcIndex, err := querybuilder.FindTopLevelKeyword(pkValue, "SOURCE", 0)
 		if err != nil {
 			return definition, err
 		}
@@ -234,7 +230,7 @@ func parseCreateDictionaryDefinition(createStatement string) (createDictionaryDe
 	}
 
 	// SOURCE(...) — extract inner content
-	srcIndex, err := findTopLevelKeyword(remainder, "SOURCE", 0)
+	srcIndex, err := querybuilder.FindTopLevelKeyword(remainder, "SOURCE", 0)
 	if err != nil {
 		return definition, err
 	}
@@ -248,7 +244,7 @@ func parseCreateDictionaryDefinition(createStatement string) (createDictionaryDe
 	}
 
 	// LIFETIME(...) — extract inner content
-	ltIndex, err := findTopLevelKeyword(remainder, "LIFETIME", 0)
+	ltIndex, err := querybuilder.FindTopLevelKeyword(remainder, "LIFETIME", 0)
 	if err != nil {
 		return definition, err
 	}
@@ -262,7 +258,7 @@ func parseCreateDictionaryDefinition(createStatement string) (createDictionaryDe
 	}
 
 	// LAYOUT(...) — extract inner content
-	layIndex, err := findTopLevelKeyword(remainder, "LAYOUT", 0)
+	layIndex, err := querybuilder.FindTopLevelKeyword(remainder, "LAYOUT", 0)
 	if err != nil {
 		return definition, err
 	}
@@ -276,14 +272,14 @@ func parseCreateDictionaryDefinition(createStatement string) (createDictionaryDe
 	}
 
 	// SETTINGS
-	setIndex, err := findTopLevelKeyword(remainder, "SETTINGS", 0)
+	setIndex, err := querybuilder.FindTopLevelKeyword(remainder, "SETTINGS", 0)
 	if err != nil {
 		return definition, err
 	}
 	if setIndex != -1 {
 		settingsValue := strings.TrimSpace(remainder[setIndex+len("SETTINGS"):])
 		// Settings end at COMMENT or end of string
-		commentIndex, err := findTopLevelKeyword(settingsValue, "COMMENT", 0)
+		commentIndex, err := querybuilder.FindTopLevelKeyword(settingsValue, "COMMENT", 0)
 		if err != nil {
 			return definition, err
 		}
@@ -300,7 +296,7 @@ func parseCreateDictionaryDefinition(createStatement string) (createDictionaryDe
 // in the CREATE DICTIONARY statement — this is the attribute list.
 func findTrailingDictionaryColumns(statement string) (int, int, bool, error) {
 	// Find PRIMARY KEY to limit our search
-	pkIndex, err := findTopLevelKeyword(statement, "PRIMARY KEY", 0)
+	pkIndex, err := querybuilder.FindTopLevelKeyword(statement, "PRIMARY KEY", 0)
 	if err != nil {
 		return 0, 0, false, err
 	}
@@ -309,50 +305,28 @@ func findTrailingDictionaryColumns(statement string) (int, int, bool, error) {
 		searchIn = statement[:pkIndex]
 	}
 
-	return findTrailingTopLevelParentheses(searchIn)
+	return querybuilder.FindTrailingTopLevelParentheses(searchIn)
 }
 
 // extractTopLevelParenContent extracts the content between balanced parentheses
 // starting the search from startIdx. Returns inner content and end position.
 func extractTopLevelParenContent(raw string, startIdx int) (string, int, error) {
-	// Find opening paren
 	openIdx := strings.IndexByte(raw[startIdx:], '(')
 	if openIdx == -1 {
 		return "", startIdx, errors.New("expected '(' not found")
 	}
 	openIdx += startIdx
 
-	// Scan for matching close, tracking paren depth independently of the SQL
-	// scanner state. The scanner state is used only to skip quoted strings so
-	// that parentheses inside string literals are not counted.
-	depth := 0
-	state := querybuilder.SQLScanState{}
-	for i := openIdx; i < len(raw); i++ {
-		ch := raw[i]
-		var err error
-		i, err = querybuilder.AdvanceSQLScanState(raw, i, &state)
-		if err != nil {
-			return "", 0, err
-		}
-		// Skip characters inside quoted strings.
-		if state.InQuote != 0 {
-			continue
-		}
-		if ch == '(' {
-			depth++
-		} else if ch == ')' {
-			depth--
-			if depth == 0 {
-				return strings.TrimSpace(raw[openIdx+1 : i]), i + 1, nil
-			}
-		}
+	closeIdx, err := querybuilder.FindMatchingClose(raw, openIdx)
+	if err != nil {
+		return "", 0, err
 	}
-	return "", 0, errors.New("unbalanced parentheses")
+	return strings.TrimSpace(raw[openIdx+1 : closeIdx]), closeIdx + 1, nil
 }
 
 // parseDictionaryAttributes parses the comma-separated attribute definitions.
 func parseDictionaryAttributes(raw string) ([]DictionaryAttribute, error) {
-	parts, err := splitTopLevelCSV(raw)
+	parts, err := querybuilder.SplitTopLevelCSV(raw)
 	if err != nil {
 		return nil, err
 	}
@@ -378,17 +352,17 @@ func parseDictionaryAttribute(raw string) (DictionaryAttribute, error) {
 	}
 
 	// Extract name
-	nameEnd, err := findColumnNameEnd(raw)
+	nameEnd, err := querybuilder.FindColumnNameEnd(raw)
 	if err != nil {
 		return attr, err
 	}
-	attr.Name = unquoteIdentifier(raw[:nameEnd])
+	attr.Name = querybuilder.UnquoteIdentifier(raw[:nameEnd])
 	remainder := strings.TrimSpace(raw[nameEnd:])
 
 	// Extract type — everything up to the first keyword or end
 	typEnd := len(remainder)
 	for _, kw := range []string{"DEFAULT", "EXPRESSION", "HIERARCHICAL", "INJECTIVE", "IS_OBJECT_ID"} {
-		idx, err := findTopLevelKeyword(remainder, kw, 0)
+		idx, err := querybuilder.FindTopLevelKeyword(remainder, kw, 0)
 		if err != nil {
 			return attr, err
 		}
@@ -398,7 +372,7 @@ func parseDictionaryAttribute(raw string) (DictionaryAttribute, error) {
 	}
 
 	rawType := strings.TrimSpace(remainder[:typEnd])
-	if inner, ok := unwrapNullableType(rawType); ok {
+	if inner, ok := querybuilder.UnwrapNullableType(rawType); ok {
 		attr.Type = inner
 		attr.Nullable = true
 	} else {
@@ -442,7 +416,7 @@ func extractExpressionUntilKeyword(raw string) (string, string) {
 	keywords := []string{"DEFAULT", "EXPRESSION", "HIERARCHICAL", "INJECTIVE", "IS_OBJECT_ID"}
 	minIdx := len(raw)
 	for _, kw := range keywords {
-		idx, _ := findTopLevelKeyword(raw, kw, 0)
+		idx, _ := querybuilder.FindTopLevelKeyword(raw, kw, 0)
 		if idx != -1 && idx < minIdx {
 			minIdx = idx
 		}
@@ -463,7 +437,7 @@ func parsePrimaryKeyList(raw string) []string {
 	for _, p := range parts {
 		p = strings.TrimSpace(p)
 		if p != "" {
-			result = append(result, unquoteIdentifier(p))
+			result = append(result, querybuilder.UnquoteIdentifier(p))
 		}
 	}
 	return result
