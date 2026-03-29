@@ -1,6 +1,7 @@
 package querybuilder
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -27,6 +28,58 @@ func quote(s string) string {
 
 func backslash(s string) string {
 	return strings.ReplaceAll(s, "\\", "\\\\")
+}
+
+func validateRequiredField(value string, fieldName string, context string) error {
+	if strings.TrimSpace(value) == "" {
+		return fmt.Errorf("%s cannot be empty for %s queries", fieldName, context)
+	}
+	return nil
+}
+
+func appendClusterClause(tokens []string, clusterName *string) []string {
+	if clusterName != nil {
+		tokens = append(tokens, "ON", "CLUSTER", quote(*clusterName))
+	}
+	return tokens
+}
+
+func isNilOrEmpty(value *string) bool {
+	return value == nil || strings.TrimSpace(*value) == ""
+}
+
+func qualifiedIdentifier(parts ...string) string {
+	tokens := make([]string, 0, len(parts))
+	for _, part := range parts {
+		tokens = append(tokens, backtick(strings.TrimSpace(part)))
+	}
+	return strings.Join(tokens, ".")
+}
+
+func rawOrQualifiedIdentifier(value string) string {
+	if strings.ContainsAny(value, "`() ") {
+		return value
+	}
+
+	return qualifiedIdentifier(strings.Split(value, ".")...)
+}
+
+// buildDefinitions applies a builder function to each item and collects the results.
+func buildDefinitions[T any](items []T, builder func(T) (string, error)) ([]string, error) {
+	var errs []error
+	results := make([]string, 0, len(items))
+	for _, item := range items {
+		result, err := builder(item)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		results = append(results, result)
+	}
+	if len(errs) > 0 {
+		return nil, errors.Join(errs...)
+	}
+	return results, nil
 }
 
 // identifierOrPattern returns a token suitable for use as a database/table identifier

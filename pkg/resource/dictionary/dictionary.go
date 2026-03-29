@@ -25,8 +25,9 @@ import (
 var dictionaryResourceDescription string
 
 var (
-	_ resource.Resource              = &Resource{}
-	_ resource.ResourceWithConfigure = &Resource{}
+	_ resource.Resource                = &Resource{}
+	_ resource.ResourceWithConfigure   = &Resource{}
+	_ resource.ResourceWithImportState = &Resource{}
 )
 
 type attributeModel struct {
@@ -53,54 +54,8 @@ func (r *Resource) Metadata(_ context.Context, req resource.MetadataRequest, res
 }
 
 func (r *Resource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
-	resp.Schema = schema.Schema{
-		Attributes: map[string]schema.Attribute{
-			"cluster_name": schema.StringAttribute{
-				Optional:    true,
-				Description: "Name of the cluster to create the dictionary into. If omitted, the DDL runs only on the connected replica.",
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
-			},
-			"id": schema.StringAttribute{
-				Computed:    true,
-				Description: "Stable identifier in the form cluster:database.dictionary or database.dictionary",
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
-			"qualified_name": schema.StringAttribute{
-				Computed:    true,
-				Description: "Qualified object name in the form database.dictionary",
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
-			"create_statement": schema.StringAttribute{
-				Computed:    true,
-				Description: "Canonical CREATE statement reported by ClickHouse",
-			},
-			"database": schema.StringAttribute{
-				Required:    true,
-				Description: "Database name that owns the dictionary",
-				Validators: []validator.String{
-					stringvalidator.LengthAtLeast(1),
-				},
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
-			},
-			"name": schema.StringAttribute{
-				Required:    true,
-				Description: "Dictionary name",
-				Validators: []validator.String{
-					stringvalidator.LengthAtLeast(1),
-				},
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
-			},
-			"attributes": schema.ListNestedAttribute{
+	attrs := schemahelpers.CommonSchemaAttributes("dictionary")
+	attrs["attributes"] = schema.ListNestedAttribute{
 				Required:    true,
 				Description: "Dictionary attributes, including key columns referenced by primary_key. This can be assigned directly from a local list of objects.",
 				Validators: []validator.List{
@@ -157,69 +112,70 @@ func (r *Resource) Schema(_ context.Context, _ resource.SchemaRequest, resp *res
 						},
 					},
 				},
-			},
-			"primary_key": schema.ListAttribute{
-				Required:    true,
-				ElementType: types.StringType,
-				Description: "Ordered list of attribute names used in the PRIMARY KEY clause",
-				Validators: []validator.List{
-					listvalidator.SizeAtLeast(1),
-				},
-				PlanModifiers: []planmodifier.List{
-					listplanmodifier.RequiresReplace(),
-				},
-			},
-			"source": schema.StringAttribute{
-				Required:    true,
-				Description: "Raw SOURCE clause body, for example CLICKHOUSE(HOST 'localhost' PORT tcpPort() USER 'default' PASSWORD 'test' DB 'posthog' TABLE 'teams_source') or NULL()",
-				Validators: []validator.String{
-					stringvalidator.LengthAtLeast(1),
-				},
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
-			},
-			"layout": schema.StringAttribute{
-				Required:    true,
-				Description: "Raw LAYOUT clause body, for example FLAT() or HASHED()",
-				Validators: []validator.String{
-					stringvalidator.LengthAtLeast(1),
-				},
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
-			},
-			"lifetime": schema.StringAttribute{
-				Required:    true,
-				Description: "Raw LIFETIME clause body, for example 0 or MIN 0 MAX 300",
-				Validators: []validator.String{
-					stringvalidator.LengthAtLeast(1),
-				},
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
-			},
-			"settings": schema.StringAttribute{
-				Optional:    true,
-				Description: "Raw SETTINGS clause body",
-				Validators: []validator.String{
-					stringvalidator.LengthAtLeast(1),
-				},
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
-			},
-			"comment": schema.StringAttribute{
-				Optional:    true,
-				Description: "Comment associated with the dictionary",
-				Validators: []validator.String{
-					stringvalidator.LengthAtLeast(1),
-				},
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
-			},
+	}
+	attrs["primary_key"] = schema.ListAttribute{
+		Required:    true,
+		ElementType: types.StringType,
+		Description: "Ordered list of attribute names used in the PRIMARY KEY clause",
+		Validators: []validator.List{
+			listvalidator.SizeAtLeast(1),
 		},
+		PlanModifiers: []planmodifier.List{
+			listplanmodifier.RequiresReplace(),
+		},
+	}
+	attrs["source"] = schema.StringAttribute{
+		Required:    true,
+		Description: "Raw SOURCE clause body, for example CLICKHOUSE(HOST 'localhost' PORT tcpPort() USER 'default' PASSWORD 'test' DB 'posthog' TABLE 'teams_source') or NULL()",
+		Validators: []validator.String{
+			stringvalidator.LengthAtLeast(1),
+		},
+		PlanModifiers: []planmodifier.String{
+			stringplanmodifier.RequiresReplace(),
+		},
+	}
+	attrs["layout"] = schema.StringAttribute{
+		Required:    true,
+		Description: "Raw LAYOUT clause body, for example FLAT() or HASHED()",
+		Validators: []validator.String{
+			stringvalidator.LengthAtLeast(1),
+		},
+		PlanModifiers: []planmodifier.String{
+			stringplanmodifier.RequiresReplace(),
+		},
+	}
+	attrs["lifetime"] = schema.StringAttribute{
+		Required:    true,
+		Description: "Raw LIFETIME clause body, for example 0 or MIN 0 MAX 300",
+		Validators: []validator.String{
+			stringvalidator.LengthAtLeast(1),
+		},
+		PlanModifiers: []planmodifier.String{
+			stringplanmodifier.RequiresReplace(),
+		},
+	}
+	attrs["settings"] = schema.StringAttribute{
+		Optional:    true,
+		Description: "Raw SETTINGS clause body",
+		Validators: []validator.String{
+			stringvalidator.LengthAtLeast(1),
+		},
+		PlanModifiers: []planmodifier.String{
+			stringplanmodifier.RequiresReplace(),
+		},
+	}
+	attrs["comment"] = schema.StringAttribute{
+		Optional:    true,
+		Description: "Comment associated with the dictionary",
+		Validators: []validator.String{
+			stringvalidator.LengthAtLeast(1),
+		},
+		PlanModifiers: []planmodifier.String{
+			stringplanmodifier.RequiresReplace(),
+		},
+	}
+	resp.Schema = schema.Schema{
+		Attributes:          attrs,
 		MarkdownDescription: dictionaryResourceDescription,
 	}
 }
@@ -266,6 +222,11 @@ func (r *Resource) Read(ctx context.Context, req resource.ReadRequest, resp *res
 		return
 	}
 
+	resp.Diagnostics.Append(syncDictionaryState(ctx, &state, dictionary)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	schemahelpers.SyncObjectState(state.ClusterName, state.Database, state.Name, dictionary.CreateStatement, &state.ID, &state.QualifiedName, &state.CreateStatement)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
@@ -287,6 +248,10 @@ func (r *Resource) Delete(ctx context.Context, req resource.DeleteRequest, resp 
 	if err := r.client.DeleteDictionary(ctx, state.Database.ValueString(), state.Name.ValueString(), state.ClusterName.ValueStringPointer()); err != nil {
 		resp.Diagnostics.AddError("Error deleting dictionary", fmt.Sprintf("%+v\n", err))
 	}
+}
+
+func (r *Resource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	schemahelpers.ImportSchemaObjectState(ctx, req, resp)
 }
 
 func (r *Resource) createDictionary(ctx context.Context, plan DictionaryResourceModel) (*DictionaryResourceModel, diag.Diagnostics) {
@@ -312,6 +277,69 @@ func (r *Resource) createDictionary(ctx context.Context, plan DictionaryResource
 	schemahelpers.SyncObjectState(state.ClusterName, state.Database, state.Name, createdDictionary.CreateStatement, &state.ID, &state.QualifiedName, &state.CreateStatement)
 
 	return &state, diags
+}
+
+func syncDictionaryState(ctx context.Context, state *DictionaryResourceModel, dict *dbops.Dictionary) diag.Diagnostics {
+	var diags diag.Diagnostics
+
+	if dict.Comment != "" {
+		state.Comment = types.StringValue(dict.Comment)
+	}
+	if dict.Source != "" {
+		state.Source = types.StringValue(dict.Source)
+	}
+	if dict.Layout != "" {
+		state.Layout = types.StringValue(dict.Layout)
+	}
+	if dict.Lifetime != "" {
+		state.Lifetime = types.StringValue(dict.Lifetime)
+	}
+	if dict.Settings != "" {
+		state.Settings = types.StringValue(dict.Settings)
+	}
+
+	if len(dict.Attributes) > 0 {
+		attrModels := make([]attributeModel, 0, len(dict.Attributes))
+		for _, attr := range dict.Attributes {
+			model := attributeModel{
+				Name:         types.StringValue(attr.Name),
+				Type:         types.StringValue(attr.Type),
+				Nullable:     types.BoolValue(attr.Nullable),
+				Hierarchical: types.BoolValue(attr.Hierarchical),
+				Injective:    types.BoolValue(attr.Injective),
+				IsObjectID:   types.BoolValue(attr.IsObjectID),
+			}
+			if attr.DefaultExpression != nil {
+				model.DefaultExpression = types.StringValue(*attr.DefaultExpression)
+			} else {
+				model.DefaultExpression = types.StringNull()
+			}
+			if attr.Expression != nil {
+				model.Expression = types.StringValue(*attr.Expression)
+			} else {
+				model.Expression = types.StringNull()
+			}
+			attrModels = append(attrModels, model)
+		}
+
+		attrList, attrDiags := types.ListValueFrom(ctx, state.Attributes.ElementType(ctx), attrModels)
+		diags.Append(attrDiags...)
+		if diags.HasError() {
+			return diags
+		}
+		state.Attributes = attrList
+	}
+
+	if len(dict.PrimaryKey) > 0 {
+		pkList, pkDiags := types.ListValueFrom(ctx, types.StringType, dict.PrimaryKey)
+		diags.Append(pkDiags...)
+		if diags.HasError() {
+			return diags
+		}
+		state.PrimaryKey = pkList
+	}
+
+	return diags
 }
 
 func expandDictionaryModel(ctx context.Context, plan DictionaryResourceModel) (dbops.Dictionary, error) {

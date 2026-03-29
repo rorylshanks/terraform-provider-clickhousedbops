@@ -107,11 +107,11 @@ func (q *createDictionaryQueryBuilder) WithComment(comment string) CreateDiction
 }
 
 func (q *createDictionaryQueryBuilder) Build() (string, error) {
-	if strings.TrimSpace(q.database) == "" {
-		return "", errors.New("database cannot be empty for CREATE DICTIONARY queries")
+	if err := validateRequiredField(q.database, "database", "CREATE DICTIONARY"); err != nil {
+		return "", err
 	}
-	if strings.TrimSpace(q.name) == "" {
-		return "", errors.New("name cannot be empty for CREATE DICTIONARY queries")
+	if err := validateRequiredField(q.name, "name", "CREATE DICTIONARY"); err != nil {
+		return "", err
 	}
 	if len(q.attributes) == 0 {
 		return "", errors.New("CREATE DICTIONARY queries require at least one attribute")
@@ -139,9 +139,7 @@ func (q *createDictionaryQueryBuilder) Build() (string, error) {
 		"DICTIONARY",
 		qualifiedIdentifier(q.database, q.name),
 	}
-	if q.clusterName != nil {
-		tokens = append(tokens, "ON", "CLUSTER", quote(*q.clusterName))
-	}
+	tokens = appendClusterClause(tokens, q.clusterName)
 
 	tokens = append(tokens,
 		fmt.Sprintf("(%s)", strings.Join(attributeDefinitions, ", ")),
@@ -163,26 +161,18 @@ func (q *createDictionaryQueryBuilder) Build() (string, error) {
 }
 
 func (q *showCreateDictionaryQueryBuilder) Build() (string, error) {
-	if strings.TrimSpace(q.database) == "" {
-		return "", errors.New("database cannot be empty for SHOW CREATE DICTIONARY queries")
+	if err := validateRequiredField(q.database, "database", "SHOW CREATE DICTIONARY"); err != nil {
+		return "", err
 	}
-	if strings.TrimSpace(q.name) == "" {
-		return "", errors.New("name cannot be empty for SHOW CREATE DICTIONARY queries")
+	if err := validateRequiredField(q.name, "name", "SHOW CREATE DICTIONARY"); err != nil {
+		return "", err
 	}
 
 	return fmt.Sprintf("SHOW CREATE DICTIONARY %s;", qualifiedIdentifier(q.database, q.name)), nil
 }
 
 func buildDictionaryAttributeDefinitions(attributes []DictionaryAttributeDefinition) ([]string, error) {
-	ret := make([]string, 0, len(attributes))
-	for _, attribute := range attributes {
-		definition, err := buildDictionaryAttributeDefinition(attribute)
-		if err != nil {
-			return nil, err
-		}
-		ret = append(ret, definition)
-	}
-	return ret, nil
+	return buildDefinitions(attributes, buildDictionaryAttributeDefinition)
 }
 
 func buildDictionaryAttributeDefinition(attribute DictionaryAttributeDefinition) (string, error) {

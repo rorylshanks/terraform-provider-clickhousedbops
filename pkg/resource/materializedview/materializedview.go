@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/resourcevalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
@@ -15,6 +16,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 
 	"github.com/ClickHouse/terraform-provider-clickhousedbops/internal/dbops"
 	"github.com/ClickHouse/terraform-provider-clickhousedbops/pkg/resource/schemahelpers"
@@ -28,6 +30,7 @@ var (
 	_ resource.ResourceWithConfigure        = &Resource{}
 	_ resource.ResourceWithConfigValidators = &Resource{}
 	_ resource.ResourceWithValidateConfig   = &Resource{}
+	_ resource.ResourceWithImportState      = &Resource{}
 )
 
 func NewResource() resource.Resource {
@@ -43,93 +46,48 @@ func (r *Resource) Metadata(_ context.Context, req resource.MetadataRequest, res
 }
 
 func (r *Resource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
-	resp.Schema = schema.Schema{
-		Attributes: map[string]schema.Attribute{
-			"cluster_name": schema.StringAttribute{
-				Optional:    true,
-				Description: "Name of the cluster to create the materialized view into. If omitted, the DDL runs only on the connected replica.",
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
-			},
-			"id": schema.StringAttribute{
-				Computed:    true,
-				Description: "Stable identifier in the form cluster:database.materialized_view or database.materialized_view",
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
-			"qualified_name": schema.StringAttribute{
-				Computed:    true,
-				Description: "Qualified object name in the form database.materialized_view",
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
-			"create_statement": schema.StringAttribute{
-				Computed:    true,
-				Description: "Canonical CREATE statement reported by ClickHouse",
-			},
-			"database": schema.StringAttribute{
-				Required:    true,
-				Description: "Database name that owns the materialized view",
-				Validators: []validator.String{
-					stringvalidator.LengthAtLeast(1),
-				},
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
-			},
-			"name": schema.StringAttribute{
-				Required:    true,
-				Description: "Materialized view name",
-				Validators: []validator.String{
-					stringvalidator.LengthAtLeast(1),
-				},
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
-			},
-			"columns": schemahelpers.ColumnsAttribute("Optional inline materialized-view columns for engine-backed definitions."),
-			"engine": schema.StringAttribute{
-				Optional:    true,
-				Description: "Raw ClickHouse engine expression. Set this or to_table, but not both.",
-				Validators: []validator.String{
-					stringvalidator.LengthAtLeast(1),
-				},
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
-			},
-			"populate": schema.BoolAttribute{
-				Optional:    true,
-				Description: "Whether to append POPULATE to the CREATE MATERIALIZED VIEW statement",
-				PlanModifiers: []planmodifier.Bool{
-					boolplanmodifier.RequiresReplace(),
-				},
-			},
-			"to_table": schema.StringAttribute{
-				Optional:    true,
-				Description: "Destination table for TO-based materialized views. Usually this references clickhousedbops_table.<name>.qualified_name.",
-				Validators: []validator.String{
-					stringvalidator.LengthAtLeast(1),
-				},
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
-			},
-			"to_columns": schemahelpers.ColumnSignaturesAttribute("Optional destination signature appended after TO <table> (...). Only name, type, and nullable are supported there."),
-			"query": schema.StringAttribute{
-				Required:    true,
-				Description: "Raw SELECT query used by the materialized view definition",
-				Validators: []validator.String{
-					stringvalidator.LengthAtLeast(1),
-				},
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
-			},
+	attrs := schemahelpers.CommonSchemaAttributes("materialized view")
+	attrs["columns"] = schemahelpers.ColumnsAttribute("Optional inline materialized-view columns for engine-backed definitions.")
+	attrs["engine"] = schema.StringAttribute{
+		Optional:    true,
+		Description: "Raw ClickHouse engine expression. Set this or to_table, but not both.",
+		Validators: []validator.String{
+			stringvalidator.LengthAtLeast(1),
 		},
+		PlanModifiers: []planmodifier.String{
+			stringplanmodifier.RequiresReplace(),
+		},
+	}
+	attrs["populate"] = schema.BoolAttribute{
+		Optional:    true,
+		Description: "Whether to append POPULATE to the CREATE MATERIALIZED VIEW statement",
+		PlanModifiers: []planmodifier.Bool{
+			boolplanmodifier.RequiresReplace(),
+		},
+	}
+	attrs["to_table"] = schema.StringAttribute{
+		Optional:    true,
+		Description: "Destination table for TO-based materialized views. Usually this references clickhousedbops_table.<name>.qualified_name.",
+		Validators: []validator.String{
+			stringvalidator.LengthAtLeast(1),
+		},
+		PlanModifiers: []planmodifier.String{
+			stringplanmodifier.RequiresReplace(),
+		},
+	}
+	attrs["to_columns"] = schemahelpers.ColumnSignaturesAttribute("Optional destination signature appended after TO <table> (...). Only name, type, and nullable are supported there.")
+	attrs["query"] = schema.StringAttribute{
+		Required:    true,
+		Description: "Raw SELECT query used by the materialized view definition",
+		Validators: []validator.String{
+			stringvalidator.LengthAtLeast(1),
+		},
+		PlanModifiers: []planmodifier.String{
+			stringplanmodifier.RequiresReplace(),
+		},
+	}
+	resp.Schema = schema.Schema{
+		Attributes:          attrs,
 		MarkdownDescription: materializedViewResourceDescription,
 	}
 }
@@ -211,6 +169,11 @@ func (r *Resource) Read(ctx context.Context, req resource.ReadRequest, resp *res
 		return
 	}
 
+	resp.Diagnostics.Append(syncMaterializedViewState(ctx, &state, view)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	schemahelpers.SyncObjectState(state.ClusterName, state.Database, state.Name, view.CreateStatement, &state.ID, &state.QualifiedName, &state.CreateStatement)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
@@ -257,6 +220,48 @@ func (r *Resource) createMaterializedView(ctx context.Context, plan Materialized
 	schemahelpers.SyncObjectState(state.ClusterName, state.Database, state.Name, createdView.CreateStatement, &state.ID, &state.QualifiedName, &state.CreateStatement)
 
 	return &state, diags
+}
+
+func (r *Resource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	schemahelpers.ImportSchemaObjectState(ctx, req, resp)
+}
+
+func syncMaterializedViewState(ctx context.Context, state *MaterializedViewResourceModel, view *dbops.MaterializedView) diag.Diagnostics {
+	var diags diag.Diagnostics
+
+	if strings.TrimSpace(view.Query) != "" {
+		state.Query = types.StringValue(view.Query)
+	}
+
+	if strings.TrimSpace(view.Engine) != "" {
+		state.Engine = types.StringValue(view.Engine)
+	}
+
+	if strings.TrimSpace(view.ToTable) != "" {
+		state.ToTable = types.StringValue(view.ToTable)
+	}
+
+	// Sync columns for engine-backed materialized views
+	if len(view.Columns) > 0 || (!state.Columns.IsNull() && !state.Columns.IsUnknown()) {
+		columns, columnDiags := schemahelpers.ColumnsValue(ctx, view.Columns)
+		diags.Append(columnDiags...)
+		if diags.HasError() {
+			return diags
+		}
+		state.Columns = columns
+	}
+
+	// Sync to_columns for TO-based materialized views
+	if len(view.ToColumns) > 0 || (!state.ToColumns.IsNull() && !state.ToColumns.IsUnknown()) {
+		toColumns, columnDiags := schemahelpers.ColumnSignaturesValue(ctx, view.ToColumns)
+		diags.Append(columnDiags...)
+		if diags.HasError() {
+			return diags
+		}
+		state.ToColumns = toColumns
+	}
+
+	return diags
 }
 
 func expandMaterializedViewModel(ctx context.Context, plan MaterializedViewResourceModel) (dbops.MaterializedView, error) {

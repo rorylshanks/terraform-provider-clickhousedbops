@@ -148,20 +148,17 @@ func (i *impl) GetTable(ctx context.Context, database string, name string, clust
 		SampleBy:        definition.SampleBy,
 		TTL:             definition.TTL,
 		Settings:        definition.Settings,
+		AsSelect:        definition.AsSelect,
 		CreateStatement: object.CreateStatement,
 	}, nil
 }
 
-func (i *impl) DeleteTable(ctx context.Context, database string, name string, clusterName *string) error {
-	table, err := i.GetTable(ctx, database, name, clusterName)
-	if err != nil {
-		return err
-	}
-	if table == nil {
+func (i *impl) deleteIfExists(ctx context.Context, exists bool, dropBuilder querybuilder.QueryBuilder) error {
+	if !exists {
 		return nil
 	}
 
-	sql, err := querybuilder.NewDropTable(database, name).WithCluster(clusterName).Build()
+	sql, err := dropBuilder.Build()
 	if err != nil {
 		return errors.WithMessage(err, "error building query")
 	}
@@ -171,6 +168,14 @@ func (i *impl) DeleteTable(ctx context.Context, database string, name string, cl
 	}
 
 	return nil
+}
+
+func (i *impl) DeleteTable(ctx context.Context, database string, name string, clusterName *string) error {
+	table, err := i.GetTable(ctx, database, name, clusterName)
+	if err != nil {
+		return err
+	}
+	return i.deleteIfExists(ctx, table != nil, querybuilder.NewDropTable(database, name).WithCluster(clusterName))
 }
 
 func (i *impl) AlterTable(ctx context.Context, database string, name string, clusterName *string, actions []string) error {
@@ -232,20 +237,7 @@ func (i *impl) DeleteView(ctx context.Context, database string, name string, clu
 	if err != nil {
 		return err
 	}
-	if view == nil {
-		return nil
-	}
-
-	sql, err := querybuilder.NewDropView(database, name).WithCluster(clusterName).Build()
-	if err != nil {
-		return errors.WithMessage(err, "error building query")
-	}
-
-	if err := i.clickhouseClient.Exec(ctx, sql); err != nil {
-		return errors.WithMessage(err, "error running query")
-	}
-
-	return nil
+	return i.deleteIfExists(ctx, view != nil, querybuilder.NewDropView(database, name).WithCluster(clusterName))
 }
 
 func (i *impl) CreateMaterializedView(ctx context.Context, view MaterializedView, clusterName *string) (*MaterializedView, error) {
@@ -285,11 +277,32 @@ func (i *impl) GetMaterializedView(ctx context.Context, database string, name st
 		return nil, nil
 	}
 
-	return &MaterializedView{
+	definition, err := parseCreateMaterializedViewDefinition(object.CreateStatement)
+	if err != nil {
+		return nil, errors.WithMessage(err, "error parsing CREATE MATERIALIZED VIEW statement")
+	}
+
+	mv := &MaterializedView{
 		Database:        object.Database,
 		Name:            object.Name,
+		Engine:          definition.Engine,
+		ToTable:         definition.ToTable,
+		Query:           definition.Query,
 		CreateStatement: object.CreateStatement,
-	}, nil
+	}
+
+	// For engine-backed materialized views, fetch full column details from system.columns
+	if definition.ToTable == "" {
+		columns, err := i.getTableColumns(ctx, database, name, clusterName)
+		if err != nil {
+			return nil, errors.WithMessage(err, "error fetching materialized view columns")
+		}
+		mv.Columns = columns
+	} else {
+		mv.Columns = definition.Columns
+	}
+
+	return mv, nil
 }
 
 func (i *impl) DeleteMaterializedView(ctx context.Context, database string, name string, clusterName *string) error {
@@ -297,23 +310,26 @@ func (i *impl) DeleteMaterializedView(ctx context.Context, database string, name
 	if err != nil {
 		return err
 	}
-	if view == nil {
-		return nil
-	}
-
-	sql, err := querybuilder.NewDropMaterializedView(database, name).WithCluster(clusterName).Build()
-	if err != nil {
-		return errors.WithMessage(err, "error building query")
-	}
-
-	if err := i.clickhouseClient.Exec(ctx, sql); err != nil {
-		return errors.WithMessage(err, "error running query")
-	}
-
-	return nil
+	return i.deleteIfExists(ctx, view != nil, querybuilder.NewDropMaterializedView(database, name).WithCluster(clusterName))
 }
 
 func (i *impl) getSchemaObject(ctx context.Context, database string, name string, clusterName *string, kind schemaObjectKind) (*schemaObject, error) {
+	whereConditions := []querybuilder.Where{
+		querybuilder.WhereEquals("database", database),
+		querybuilder.WhereEquals("name", name),
+	}
+	switch kind {
+	case schemaObjectKindTable:
+		whereConditions = append(whereConditions,
+			querybuilder.WhereDiffers("engine", "View"),
+			querybuilder.WhereDiffers("engine", "MaterializedView"),
+		)
+	case schemaObjectKindView:
+		whereConditions = append(whereConditions, querybuilder.WhereEquals("engine", "View"))
+	case schemaObjectKindMaterializedView:
+		whereConditions = append(whereConditions, querybuilder.WhereEquals("engine", "MaterializedView"))
+	}
+
 	sql, err := querybuilder.NewSelect(
 		[]querybuilder.Field{
 			querybuilder.NewField("database"),
@@ -323,10 +339,7 @@ func (i *impl) getSchemaObject(ctx context.Context, database string, name string
 			querybuilder.NewField("create_table_query"),
 		},
 		"system.tables",
-	).WithCluster(clusterName).Where(
-		querybuilder.WhereEquals("database", database),
-		querybuilder.WhereEquals("name", name),
-	).Build()
+	).WithCluster(clusterName).Where(whereConditions...).Build()
 	if err != nil {
 		return nil, errors.WithMessage(err, "error building query")
 	}
@@ -377,23 +390,6 @@ func (i *impl) getSchemaObject(ctx context.Context, database string, name string
 		return nil, nil
 	}
 
-	switch kind {
-	case schemaObjectKindTable:
-		if object.Engine == "View" || object.Engine == "MaterializedView" {
-			return nil, nil
-		}
-	case schemaObjectKindView:
-		if object.Engine != "View" {
-			return nil, nil
-		}
-	case schemaObjectKindMaterializedView:
-		if object.Engine != "MaterializedView" {
-			return nil, nil
-		}
-	default:
-		return nil, errors.New("unsupported schema object kind")
-	}
-
 	if strings.TrimSpace(object.EngineFull) == "" {
 		object.EngineFull = object.Engine
 	}
@@ -419,6 +415,13 @@ type createTableClause struct {
 
 type createViewDefinition struct {
 	Columns []Column
+	Query   string
+}
+
+type createMaterializedViewDefinition struct {
+	Columns []Column
+	Engine  string
+	ToTable string
 	Query   string
 }
 
@@ -533,13 +536,19 @@ func parseCreateTableDefinition(createStatement string) (createTableDefinition, 
 		return definition, nil
 	}
 
-	engineStart := findTopLevelKeyword(statement, "ENGINE =", 0)
+	engineStart, err := findTopLevelKeyword(statement, "ENGINE =", 0)
+	if err != nil {
+		return definition, err
+	}
 	if engineStart == -1 {
 		return definition, errors.New("unable to locate ENGINE clause in CREATE TABLE statement")
 	}
 
 	engineValueStart := engineStart + len("ENGINE =")
-	nextClause := findNextCreateTableClause(statement, engineValueStart)
+	nextClause, err := findNextCreateTableClause(statement, engineValueStart)
+	if err != nil {
+		return definition, err
+	}
 	engineValueEnd := len(statement)
 	if nextClause != nil {
 		engineValueEnd = nextClause.index
@@ -548,7 +557,10 @@ func parseCreateTableDefinition(createStatement string) (createTableDefinition, 
 
 	for clause := nextClause; clause != nil; {
 		valueStart := clause.index + len(clause.keyword)
-		nextClause = findNextCreateTableClause(statement, valueStart)
+		nextClause, err = findNextCreateTableClause(statement, valueStart)
+		if err != nil {
+			return definition, err
+		}
 		valueEnd := len(statement)
 		if nextClause != nil {
 			valueEnd = nextClause.index
@@ -586,7 +598,10 @@ func parseCreateViewDefinition(createStatement string) (createViewDefinition, er
 		return definition, nil
 	}
 
-	asIndex := findTopLevelKeyword(statement, "AS", 0)
+	asIndex, err := findTopLevelKeyword(statement, "AS", 0)
+	if err != nil {
+		return definition, err
+	}
 	if asIndex == -1 {
 		return definition, errors.New("unable to locate AS clause in CREATE VIEW statement")
 	}
@@ -613,12 +628,87 @@ func parseCreateViewDefinition(createStatement string) (createViewDefinition, er
 	return definition, nil
 }
 
-func findNextCreateTableClause(raw string, start int) *createTableClause {
+func parseCreateMaterializedViewDefinition(createStatement string) (createMaterializedViewDefinition, error) {
+	definition := createMaterializedViewDefinition{}
+	statement := strings.TrimSpace(strings.TrimSuffix(createStatement, ";"))
+	if statement == "" {
+		return definition, nil
+	}
+
+	// Find AS keyword — the query always follows AS
+	asIndex, err := findTopLevelKeyword(statement, "AS", 0)
+	if err != nil {
+		return definition, err
+	}
+	if asIndex == -1 {
+		return definition, errors.New("unable to locate AS clause in CREATE MATERIALIZED VIEW statement")
+	}
+	definition.Query = strings.TrimSpace(statement[asIndex+len("AS"):])
+
+	prefix := strings.TrimSpace(statement[:asIndex])
+
+	// Check for TO <table> clause
+	toIndex, err := findTopLevelKeyword(prefix, "TO", 0)
+	if err != nil {
+		return definition, err
+	}
+	if toIndex != -1 {
+		toValue := strings.TrimSpace(prefix[toIndex+len("TO"):])
+		// TO table may be followed by column signatures in parens — strip those
+		if openIdx, _, ok, err := findTrailingTopLevelParentheses(toValue); err != nil {
+			return definition, err
+		} else if ok {
+			toValue = strings.TrimSpace(toValue[:openIdx])
+		}
+		definition.ToTable = toValue
+		return definition, nil
+	}
+
+	// No TO clause — check for ENGINE = clause (engine-backed materialized view)
+	engineIndex, err := findTopLevelKeyword(prefix, "ENGINE =", 0)
+	if err != nil {
+		return definition, err
+	}
+	if engineIndex != -1 {
+		definition.Engine = strings.TrimSpace(prefix[engineIndex+len("ENGINE ="):])
+		// Engine value may be followed by ORDER BY etc. — find trailing parens for column signatures
+		// above the ENGINE clause
+		columnPrefix := strings.TrimSpace(prefix[:engineIndex])
+		if openIdx, closeIdx, ok, parseErr := findTrailingTopLevelParentheses(columnPrefix); parseErr != nil {
+			return definition, parseErr
+		} else if ok {
+			columns, parseErr := parseColumnSignatures(columnPrefix[openIdx+1 : closeIdx])
+			if parseErr != nil {
+				return definition, parseErr
+			}
+			definition.Columns = columns
+		}
+		return definition, nil
+	}
+
+	// No TO and no ENGINE — check for column signatures in prefix
+	if openIdx, closeIdx, ok, parseErr := findTrailingTopLevelParentheses(prefix); parseErr != nil {
+		return definition, parseErr
+	} else if ok {
+		columns, parseErr := parseColumnSignatures(prefix[openIdx+1 : closeIdx])
+		if parseErr != nil {
+			return definition, parseErr
+		}
+		definition.Columns = columns
+	}
+
+	return definition, nil
+}
+
+func findNextCreateTableClause(raw string, start int) (*createTableClause, error) {
 	keywords := []string{"PARTITION BY", "ORDER BY", "PRIMARY KEY", "SAMPLE BY", "TTL", "SETTINGS", "AS"}
 
 	var next *createTableClause
 	for _, keyword := range keywords {
-		index := findTopLevelKeyword(raw, keyword, start)
+		index, err := findTopLevelKeyword(raw, keyword, start)
+		if err != nil {
+			return nil, err
+		}
 		if index == -1 {
 			continue
 		}
@@ -627,7 +717,7 @@ func findNextCreateTableClause(raw string, start int) *createTableClause {
 		}
 	}
 
-	return next
+	return next, nil
 }
 
 func findTrailingTopLevelParentheses(raw string) (int, int, bool, error) {
@@ -772,13 +862,13 @@ func unquoteIdentifier(raw string) string {
 	return raw
 }
 
-func findTopLevelKeyword(raw string, keyword string, start int) int {
+func findTopLevelKeyword(raw string, keyword string, start int) (int, error) {
 	state := querybuilder.SQLScanState{}
 	for index := 0; index < len(raw); index++ {
 		var err error
 		index, err = querybuilder.AdvanceSQLScanState(raw, index, &state)
 		if err != nil {
-			return -1
+			return -1, errors.WithMessage(err, fmt.Sprintf("error scanning SQL near position %d", index))
 		}
 		if index < start || !state.IsTopLevel() {
 			continue
@@ -789,10 +879,10 @@ func findTopLevelKeyword(raw string, keyword string, start int) int {
 		if !isClauseBoundary(raw, index-1) || !isClauseBoundary(raw, index+len(keyword)) {
 			continue
 		}
-		return index
+		return index, nil
 	}
 
-	return -1
+	return -1, nil
 }
 
 func isClauseBoundary(raw string, index int) bool {
@@ -800,7 +890,7 @@ func isClauseBoundary(raw string, index int) bool {
 		return true
 	}
 	switch raw[index] {
-	case ' ', '\t', '\n', '\r':
+	case ' ', '\t', '\n', '\r', '(':
 		return true
 	default:
 		return false

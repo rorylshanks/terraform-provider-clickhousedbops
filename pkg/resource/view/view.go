@@ -23,8 +23,9 @@ import (
 var viewResourceDescription string
 
 var (
-	_ resource.Resource              = &Resource{}
-	_ resource.ResourceWithConfigure = &Resource{}
+	_ resource.Resource                = &Resource{}
+	_ resource.ResourceWithConfigure   = &Resource{}
+	_ resource.ResourceWithImportState = &Resource{}
 )
 
 func NewResource() resource.Resource {
@@ -40,65 +41,20 @@ func (r *Resource) Metadata(_ context.Context, req resource.MetadataRequest, res
 }
 
 func (r *Resource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
-	resp.Schema = schema.Schema{
-		Attributes: map[string]schema.Attribute{
-			"cluster_name": schema.StringAttribute{
-				Optional:    true,
-				Description: "Name of the cluster to create the view into. If omitted, the DDL runs only on the connected replica.",
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
-			},
-			"id": schema.StringAttribute{
-				Computed:    true,
-				Description: "Stable identifier in the form cluster:database.view or database.view",
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
-			"qualified_name": schema.StringAttribute{
-				Computed:    true,
-				Description: "Qualified object name in the form database.view",
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
-			"create_statement": schema.StringAttribute{
-				Computed:    true,
-				Description: "Canonical CREATE statement reported by ClickHouse",
-			},
-			"database": schema.StringAttribute{
-				Required:    true,
-				Description: "Database name that owns the view",
-				Validators: []validator.String{
-					stringvalidator.LengthAtLeast(1),
-				},
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
-			},
-			"name": schema.StringAttribute{
-				Required:    true,
-				Description: "View name",
-				Validators: []validator.String{
-					stringvalidator.LengthAtLeast(1),
-				},
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
-			},
-			"columns": schemahelpers.ColumnSignaturesAttribute("Optional view signature. Only name, type, and nullable are included in the CREATE VIEW signature."),
-			"query": schema.StringAttribute{
-				Required:    true,
-				Description: "Raw SELECT query used by the view definition",
-				Validators: []validator.String{
-					stringvalidator.LengthAtLeast(1),
-				},
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
-			},
+	attrs := schemahelpers.CommonSchemaAttributes("view")
+	attrs["columns"] = schemahelpers.ColumnSignaturesAttribute("Optional view signature. Only name, type, and nullable are included in the CREATE VIEW signature.")
+	attrs["query"] = schema.StringAttribute{
+		Required:    true,
+		Description: "Raw SELECT query used by the view definition",
+		Validators: []validator.String{
+			stringvalidator.LengthAtLeast(1),
 		},
+		PlanModifiers: []planmodifier.String{
+			stringplanmodifier.RequiresReplace(),
+		},
+	}
+	resp.Schema = schema.Schema{
+		Attributes:          attrs,
 		MarkdownDescription: viewResourceDescription,
 	}
 }
@@ -171,6 +127,10 @@ func (r *Resource) Delete(ctx context.Context, req resource.DeleteRequest, resp 
 	if err := r.client.DeleteView(ctx, state.Database.ValueString(), state.Name.ValueString(), state.ClusterName.ValueStringPointer()); err != nil {
 		resp.Diagnostics.AddError("Error deleting view", fmt.Sprintf("%+v\n", err))
 	}
+}
+
+func (r *Resource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	schemahelpers.ImportSchemaObjectState(ctx, req, resp)
 }
 
 func (r *Resource) createView(ctx context.Context, plan ViewResourceModel) (*ViewResourceModel, diag.Diagnostics) {

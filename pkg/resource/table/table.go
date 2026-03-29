@@ -24,9 +24,10 @@ import (
 var tableResourceDescription string
 
 var (
-	_ resource.Resource               = &Resource{}
-	_ resource.ResourceWithConfigure  = &Resource{}
-	_ resource.ResourceWithModifyPlan = &Resource{}
+	_ resource.Resource                = &Resource{}
+	_ resource.ResourceWithConfigure   = &Resource{}
+	_ resource.ResourceWithModifyPlan  = &Resource{}
+	_ resource.ResourceWithImportState = &Resource{}
 )
 
 func NewResource() resource.Resource {
@@ -42,117 +43,72 @@ func (r *Resource) Metadata(_ context.Context, req resource.MetadataRequest, res
 }
 
 func (r *Resource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
-	resp.Schema = schema.Schema{
-		Attributes: map[string]schema.Attribute{
-			"cluster_name": schema.StringAttribute{
-				Optional:    true,
-				Description: "Name of the cluster to create the table into. If omitted, the DDL runs only on the connected replica.",
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
-			},
-			"id": schema.StringAttribute{
-				Computed:    true,
-				Description: "Stable identifier in the form cluster:database.table or database.table",
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
-			"qualified_name": schema.StringAttribute{
-				Computed:    true,
-				Description: "Qualified object name in the form database.table",
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
-			"create_statement": schema.StringAttribute{
-				Computed:    true,
-				Description: "Canonical CREATE statement reported by ClickHouse",
-			},
-			"database": schema.StringAttribute{
-				Required:    true,
-				Description: "Database name that owns the table",
-				Validators: []validator.String{
-					stringvalidator.LengthAtLeast(1),
-				},
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
-			},
-			"name": schema.StringAttribute{
-				Required:    true,
-				Description: "Table name",
-				Validators: []validator.String{
-					stringvalidator.LengthAtLeast(1),
-				},
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
-			},
-			"engine": schema.StringAttribute{
-				Required:    true,
-				Description: "Raw ClickHouse engine expression, for example MergeTree(), Distributed(...), or Kafka(...)",
-				Validators: []validator.String{
-					stringvalidator.LengthAtLeast(1),
-				},
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
-			},
-			"columns": schemahelpers.ColumnsAttributeWithPlanModifiers("Structured column definitions. This can be assigned directly from a local list of objects.", nil),
-			"partition_by": schema.StringAttribute{
-				Optional:    true,
-				Description: "Raw PARTITION BY clause expression",
-				Validators: []validator.String{
-					stringvalidator.LengthAtLeast(1),
-				},
-			},
-			"order_by": schema.StringAttribute{
-				Optional:    true,
-				Description: "Raw ORDER BY clause expression",
-				Validators: []validator.String{
-					stringvalidator.LengthAtLeast(1),
-				},
-			},
-			"primary_key": schema.StringAttribute{
-				Optional:    true,
-				Description: "Raw PRIMARY KEY clause expression",
-				Validators: []validator.String{
-					stringvalidator.LengthAtLeast(1),
-				},
-			},
-			"sample_by": schema.StringAttribute{
-				Optional:    true,
-				Description: "Raw SAMPLE BY clause expression",
-				Validators: []validator.String{
-					stringvalidator.LengthAtLeast(1),
-				},
-			},
-			"ttl": schema.StringAttribute{
-				Optional:    true,
-				Description: "Raw TTL clause expression",
-				Validators: []validator.String{
-					stringvalidator.LengthAtLeast(1),
-				},
-			},
-			"settings": schema.StringAttribute{
-				Optional:    true,
-				Description: "Raw SETTINGS clause body",
-				Validators: []validator.String{
-					stringvalidator.LengthAtLeast(1),
-				},
-			},
-			"as_select": schema.StringAttribute{
-				Optional:    true,
-				Description: "Optional raw query appended as AS <query> after the table definition",
-				Validators: []validator.String{
-					stringvalidator.LengthAtLeast(1),
-				},
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
-			},
+	attrs := schemahelpers.CommonSchemaAttributes("table")
+	attrs["engine"] = schema.StringAttribute{
+		Required:    true,
+		Description: "Raw ClickHouse engine expression, for example MergeTree(), Distributed(...), or Kafka(...)",
+		Validators: []validator.String{
+			stringvalidator.LengthAtLeast(1),
 		},
+		PlanModifiers: []planmodifier.String{
+			stringplanmodifier.RequiresReplace(),
+		},
+	}
+	attrs["columns"] = schemahelpers.ColumnsAttributeWithPlanModifiers("Structured column definitions. This can be assigned directly from a local list of objects.", nil)
+	attrs["partition_by"] = schema.StringAttribute{
+		Optional:    true,
+		Description: "Raw PARTITION BY clause expression",
+		Validators: []validator.String{
+			stringvalidator.LengthAtLeast(1),
+		},
+	}
+	attrs["order_by"] = schema.StringAttribute{
+		Optional:    true,
+		Description: "Raw ORDER BY clause expression",
+		Validators: []validator.String{
+			stringvalidator.LengthAtLeast(1),
+		},
+	}
+	attrs["primary_key"] = schema.StringAttribute{
+		Optional:    true,
+		Description: "Raw PRIMARY KEY clause expression",
+		Validators: []validator.String{
+			stringvalidator.LengthAtLeast(1),
+		},
+	}
+	attrs["sample_by"] = schema.StringAttribute{
+		Optional:    true,
+		Description: "Raw SAMPLE BY clause expression",
+		Validators: []validator.String{
+			stringvalidator.LengthAtLeast(1),
+		},
+	}
+	attrs["ttl"] = schema.StringAttribute{
+		Optional:    true,
+		Description: "Raw TTL clause expression",
+		Validators: []validator.String{
+			stringvalidator.LengthAtLeast(1),
+		},
+	}
+	attrs["settings"] = schema.StringAttribute{
+		Optional:    true,
+		Description: "Raw SETTINGS clause body",
+		Validators: []validator.String{
+			stringvalidator.LengthAtLeast(1),
+		},
+	}
+	attrs["as_select"] = schema.StringAttribute{
+		Optional:    true,
+		Description: "Optional raw query appended as AS <query> after the table definition",
+		Validators: []validator.String{
+			stringvalidator.LengthAtLeast(1),
+		},
+		PlanModifiers: []planmodifier.String{
+			stringplanmodifier.RequiresReplace(),
+		},
+	}
+	resp.Schema = schema.Schema{
+		Attributes:          attrs,
 		MarkdownDescription: tableResourceDescription,
 	}
 }
@@ -311,11 +267,6 @@ func (r *Resource) Update(ctx context.Context, req resource.UpdateRequest, resp 
 		return
 	}
 
-	resp.Diagnostics.Append(validateTableForEngine(desiredTable, capabilities)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
 	settingNames := collectSettingNames(currentTable.Settings, desiredTable.Settings)
 	settingCapabilities, err := r.client.GetTableSettingCapabilities(ctx, currentTable.Engine, settingNames)
 	if err != nil {
@@ -370,22 +321,15 @@ func (r *Resource) Delete(ctx context.Context, req resource.DeleteRequest, resp 
 	}
 }
 
+func (r *Resource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	schemahelpers.ImportSchemaObjectState(ctx, req, resp)
+}
+
 func (r *Resource) createTable(ctx context.Context, plan TableResourceModel) (*TableResourceModel, diag.Diagnostics) {
 	var diags diag.Diagnostics
 
 	table, err := expandTableModel(ctx, plan)
 	diags.Append(schemahelpers.DiagnosticsFromErr("Invalid table configuration", err)...)
-	if diags.HasError() {
-		return nil, diags
-	}
-
-	capabilities, err := r.client.GetTableEngineCapabilities(ctx, table.Engine)
-	diags.Append(schemahelpers.DiagnosticsFromErr("Invalid table configuration", err)...)
-	if diags.HasError() {
-		return nil, diags
-	}
-
-	diags.Append(validateTableForEngine(table, capabilities)...)
 	if diags.HasError() {
 		return nil, diags
 	}

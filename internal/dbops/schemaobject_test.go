@@ -112,3 +112,170 @@ func TestTableColumnKeyStableForDuplicateClusterRows(t *testing.T) {
 		t.Fatalf("expected identical columns to produce the same dedupe key")
 	}
 }
+
+func TestParseCreateTableDefinition_EmptyInput(t *testing.T) {
+	definition, err := parseCreateTableDefinition("")
+	if err != nil {
+		t.Fatalf("parseCreateTableDefinition() error = %v", err)
+	}
+	if definition.Engine != "" {
+		t.Fatalf("expected empty engine, got %q", definition.Engine)
+	}
+	if definition.PartitionBy != "" {
+		t.Fatalf("expected empty partition_by, got %q", definition.PartitionBy)
+	}
+	if definition.OrderBy != "" {
+		t.Fatalf("expected empty order_by, got %q", definition.OrderBy)
+	}
+	if definition.PrimaryKey != "" {
+		t.Fatalf("expected empty primary_key, got %q", definition.PrimaryKey)
+	}
+	if definition.SampleBy != "" {
+		t.Fatalf("expected empty sample_by, got %q", definition.SampleBy)
+	}
+	if definition.TTL != "" {
+		t.Fatalf("expected empty ttl, got %q", definition.TTL)
+	}
+	if definition.Settings != "" {
+		t.Fatalf("expected empty settings, got %q", definition.Settings)
+	}
+	if definition.AsSelect != "" {
+		t.Fatalf("expected empty as_select, got %q", definition.AsSelect)
+	}
+}
+
+func TestParseCreateTableDefinition_AllClauses(t *testing.T) {
+	stmt := "CREATE TABLE `mydb`.`mytable` (`id` UInt64, `ts` DateTime, `value` Float64) ENGINE = MergeTree PARTITION BY toYYYYMM(ts) ORDER BY (id, ts) PRIMARY KEY id SAMPLE BY id TTL ts + toIntervalDay(30) SETTINGS index_granularity = 8192, ttl_only_drop_parts = 1"
+	definition, err := parseCreateTableDefinition(stmt)
+	if err != nil {
+		t.Fatalf("parseCreateTableDefinition() error = %v", err)
+	}
+	if definition.Engine != "MergeTree" {
+		t.Fatalf("expected engine MergeTree, got %q", definition.Engine)
+	}
+	if definition.PartitionBy != "toYYYYMM(ts)" {
+		t.Fatalf("unexpected partition_by: %q", definition.PartitionBy)
+	}
+	if definition.OrderBy != "(id, ts)" {
+		t.Fatalf("unexpected order_by: %q", definition.OrderBy)
+	}
+	if definition.PrimaryKey != "id" {
+		t.Fatalf("unexpected primary_key: %q", definition.PrimaryKey)
+	}
+	if definition.SampleBy != "id" {
+		t.Fatalf("unexpected sample_by: %q", definition.SampleBy)
+	}
+	if definition.TTL != "ts + toIntervalDay(30)" {
+		t.Fatalf("unexpected ttl: %q", definition.TTL)
+	}
+	if definition.Settings != "index_granularity = 8192, ttl_only_drop_parts = 1" {
+		t.Fatalf("unexpected settings: %q", definition.Settings)
+	}
+}
+
+func TestParseCreateTableDefinition_NestedEngineArgs(t *testing.T) {
+	stmt := "CREATE TABLE `mydb`.`mytable` (`id` UInt64) ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}', '{replica}') ORDER BY id"
+	definition, err := parseCreateTableDefinition(stmt)
+	if err != nil {
+		t.Fatalf("parseCreateTableDefinition() error = %v", err)
+	}
+	if definition.Engine != "ReplicatedMergeTree('/clickhouse/tables/{shard}', '{replica}')" {
+		t.Fatalf("unexpected engine: %q", definition.Engine)
+	}
+	if definition.OrderBy != "id" {
+		t.Fatalf("unexpected order_by: %q", definition.OrderBy)
+	}
+}
+
+func TestParseCreateTableDefinition_AsSelect(t *testing.T) {
+	stmt := "CREATE TABLE `mydb`.`derived` (`id` UInt64) ENGINE = MergeTree ORDER BY id AS SELECT id FROM mydb.source WHERE id > 0"
+	definition, err := parseCreateTableDefinition(stmt)
+	if err != nil {
+		t.Fatalf("parseCreateTableDefinition() error = %v", err)
+	}
+	if definition.Engine != "MergeTree" {
+		t.Fatalf("unexpected engine: %q", definition.Engine)
+	}
+	if definition.OrderBy != "id" {
+		t.Fatalf("unexpected order_by: %q", definition.OrderBy)
+	}
+	if definition.AsSelect != "SELECT id FROM mydb.source WHERE id > 0" {
+		t.Fatalf("unexpected as_select: %q", definition.AsSelect)
+	}
+}
+
+func TestParseCreateMaterializedViewDefinition_ToTable(t *testing.T) {
+	stmt := "CREATE MATERIALIZED VIEW `mydb`.`mv` TO mydb.target AS SELECT id, count() AS cnt FROM mydb.source GROUP BY id"
+	definition, err := parseCreateMaterializedViewDefinition(stmt)
+	if err != nil {
+		t.Fatalf("parseCreateMaterializedViewDefinition() error = %v", err)
+	}
+	if definition.ToTable != "mydb.target" {
+		t.Fatalf("unexpected to_table: %q", definition.ToTable)
+	}
+	if definition.Query != "SELECT id, count() AS cnt FROM mydb.source GROUP BY id" {
+		t.Fatalf("unexpected query: %q", definition.Query)
+	}
+	if definition.Engine != "" {
+		t.Fatalf("expected empty engine for TO-table MV, got %q", definition.Engine)
+	}
+}
+
+func TestParseCreateMaterializedViewDefinition_EngineBacked(t *testing.T) {
+	stmt := "CREATE MATERIALIZED VIEW `mydb`.`mv` (`id` UInt64, `cnt` UInt64) ENGINE = MergeTree() ORDER BY id AS SELECT id, count() AS cnt FROM mydb.source GROUP BY id"
+	definition, err := parseCreateMaterializedViewDefinition(stmt)
+	if err != nil {
+		t.Fatalf("parseCreateMaterializedViewDefinition() error = %v", err)
+	}
+	if definition.Engine != "MergeTree() ORDER BY id" {
+		t.Fatalf("unexpected engine: %q", definition.Engine)
+	}
+	if definition.Query != "SELECT id, count() AS cnt FROM mydb.source GROUP BY id" {
+		t.Fatalf("unexpected query: %q", definition.Query)
+	}
+	if definition.ToTable != "" {
+		t.Fatalf("expected empty to_table for engine-backed MV, got %q", definition.ToTable)
+	}
+	if len(definition.Columns) != 2 {
+		t.Fatalf("expected 2 columns, got %d", len(definition.Columns))
+	}
+	if definition.Columns[0].Name != "id" || definition.Columns[0].Type != "UInt64" {
+		t.Fatalf("unexpected first column: %#v", definition.Columns[0])
+	}
+	if definition.Columns[1].Name != "cnt" || definition.Columns[1].Type != "UInt64" {
+		t.Fatalf("unexpected second column: %#v", definition.Columns[1])
+	}
+}
+
+func TestParseCreateMaterializedViewDefinition_Empty(t *testing.T) {
+	definition, err := parseCreateMaterializedViewDefinition("")
+	if err != nil {
+		t.Fatalf("parseCreateMaterializedViewDefinition() error = %v", err)
+	}
+	if definition.Engine != "" {
+		t.Fatalf("expected empty engine, got %q", definition.Engine)
+	}
+	if definition.ToTable != "" {
+		t.Fatalf("expected empty to_table, got %q", definition.ToTable)
+	}
+	if definition.Query != "" {
+		t.Fatalf("expected empty query, got %q", definition.Query)
+	}
+	if len(definition.Columns) != 0 {
+		t.Fatalf("expected no columns, got %d", len(definition.Columns))
+	}
+}
+
+func TestParseCreateMaterializedViewDefinition_WithColumns(t *testing.T) {
+	stmt := "CREATE MATERIALIZED VIEW `mydb`.`mv` (`user_id` UInt64, `name` Nullable(String)) TO mydb.target AS SELECT user_id, name FROM mydb.users"
+	definition, err := parseCreateMaterializedViewDefinition(stmt)
+	if err != nil {
+		t.Fatalf("parseCreateMaterializedViewDefinition() error = %v", err)
+	}
+	if definition.ToTable != "mydb.target" {
+		t.Fatalf("unexpected to_table: %q", definition.ToTable)
+	}
+	if definition.Query != "SELECT user_id, name FROM mydb.users" {
+		t.Fatalf("unexpected query: %q", definition.Query)
+	}
+}

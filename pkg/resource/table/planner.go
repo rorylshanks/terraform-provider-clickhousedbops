@@ -297,7 +297,7 @@ func planColumnUpdate(current dbops.Table, desired dbops.Table, strategy engineU
 		currentColumn, exists := currentMap[desiredColumn.Name]
 		if !exists {
 			position := columnPositionFor(previousName)
-			action, err := querybuilder.BuildAddColumnAction(toQueryBuilderColumn(desiredColumn), position)
+			action, err := querybuilder.BuildAddColumnAction(dbops.ToQueryBuilderColumn(desiredColumn), position)
 			if err != nil {
 				return columnUpdatePlan{}, err
 			}
@@ -328,7 +328,7 @@ func planColumnUpdate(current dbops.Table, desired dbops.Table, strategy engineU
 			if positionChanged {
 				position = columnPositionFor(previousName)
 			}
-			action, err := querybuilder.BuildModifyColumnAction(toQueryBuilderColumn(desiredColumn), position)
+			action, err := querybuilder.BuildModifyColumnAction(dbops.ToQueryBuilderColumn(desiredColumn), position)
 			if err != nil {
 				return columnUpdatePlan{}, err
 			}
@@ -706,10 +706,6 @@ func columnPositionFor(previousName string) *querybuilder.ColumnPosition {
 		return querybuilder.FirstColumnPosition()
 	}
 	return querybuilder.AfterColumnPosition(previousName)
-}
-
-func toQueryBuilderColumn(column dbops.Column) querybuilder.ColumnDefinition {
-	return dbops.ToQueryBuilderColumn(column)
 }
 
 func extractColumnExpression(column dbops.Column) columnExpression {

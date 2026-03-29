@@ -10,9 +10,12 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
@@ -316,4 +319,84 @@ func optionalStringValue(value *string) types.String {
 		return types.StringNull()
 	}
 	return types.StringValue(*value)
+}
+
+// CommonSchemaAttributes returns the schema attributes shared by all schema object resources
+// (table, view, materialized_view, dictionary). The objectType parameter is used in descriptions.
+func CommonSchemaAttributes(objectType string) map[string]schema.Attribute {
+	return map[string]schema.Attribute{
+		"cluster_name": schema.StringAttribute{
+			Optional:    true,
+			Description: fmt.Sprintf("Name of the cluster to create the %s into. If omitted, the DDL runs only on the connected replica.", objectType),
+			PlanModifiers: []planmodifier.String{
+				stringplanmodifier.RequiresReplace(),
+			},
+		},
+		"id": schema.StringAttribute{
+			Computed:    true,
+			Description: fmt.Sprintf("Stable identifier in the form cluster:database.%s or database.%s", objectType, objectType),
+			PlanModifiers: []planmodifier.String{
+				stringplanmodifier.UseStateForUnknown(),
+			},
+		},
+		"qualified_name": schema.StringAttribute{
+			Computed:    true,
+			Description: fmt.Sprintf("Qualified name in the form database.%s", objectType),
+			PlanModifiers: []planmodifier.String{
+				stringplanmodifier.UseStateForUnknown(),
+			},
+		},
+		"create_statement": schema.StringAttribute{
+			Computed:    true,
+			Description: fmt.Sprintf("The CREATE %s statement as returned by ClickHouse", strings.ToUpper(objectType)),
+		},
+		"database": schema.StringAttribute{
+			Required:    true,
+			Description: "Database where the object resides",
+			Validators: []validator.String{
+				stringvalidator.LengthAtLeast(1),
+			},
+			PlanModifiers: []planmodifier.String{
+				stringplanmodifier.RequiresReplace(),
+			},
+		},
+		"name": schema.StringAttribute{
+			Required:    true,
+			Description: fmt.Sprintf("%s name", strings.Title(objectType)),
+			Validators: []validator.String{
+				stringvalidator.LengthAtLeast(1),
+			},
+			PlanModifiers: []planmodifier.String{
+				stringplanmodifier.RequiresReplace(),
+			},
+		},
+	}
+}
+
+// ImportSchemaObjectState handles the common ImportState logic for schema objects.
+// It parses the import ID in the format [cluster:]database.name and sets the
+// database, name, and optionally cluster_name attributes on the state.
+func ImportSchemaObjectState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	ref := req.ID
+	var clusterName *string
+	if strings.Contains(ref, ":") {
+		parts := strings.SplitN(ref, ":", 2)
+		clusterName = &parts[0]
+		ref = parts[1]
+	}
+
+	parts := strings.SplitN(ref, ".", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		resp.Diagnostics.AddError(
+			"Invalid import ID",
+			fmt.Sprintf("Expected format: [cluster:]database.name, got: %s", req.ID),
+		)
+		return
+	}
+
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("database"), parts[0])...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("name"), parts[1])...)
+	if clusterName != nil {
+		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("cluster_name"), *clusterName)...)
+	}
 }

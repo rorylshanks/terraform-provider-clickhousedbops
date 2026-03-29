@@ -156,11 +156,11 @@ func (q *createTableQueryBuilder) WithAsSelect(query string) CreateTableQueryBui
 }
 
 func (q *createTableQueryBuilder) Build() (string, error) {
-	if strings.TrimSpace(q.database) == "" {
-		return "", errors.New("database cannot be empty for CREATE TABLE queries")
+	if err := validateRequiredField(q.database, "database", "CREATE TABLE"); err != nil {
+		return "", err
 	}
-	if strings.TrimSpace(q.name) == "" {
-		return "", errors.New("name cannot be empty for CREATE TABLE queries")
+	if err := validateRequiredField(q.name, "name", "CREATE TABLE"); err != nil {
+		return "", err
 	}
 	if q.engine == nil || strings.TrimSpace(*q.engine) == "" {
 		return "", errors.New("engine cannot be empty for CREATE TABLE queries")
@@ -174,9 +174,7 @@ func (q *createTableQueryBuilder) Build() (string, error) {
 		"TABLE",
 		qualifiedIdentifier(q.database, q.name),
 	}
-	if q.clusterName != nil {
-		tokens = append(tokens, "ON", "CLUSTER", quote(*q.clusterName))
-	}
+	tokens = appendClusterClause(tokens, q.clusterName)
 	if len(q.columns) > 0 {
 		definitions, err := buildColumnDefinitions(q.columns)
 		if err != nil {
@@ -228,11 +226,11 @@ func (q *createViewQueryBuilder) WithQuery(query string) CreateViewQueryBuilder 
 }
 
 func (q *createViewQueryBuilder) Build() (string, error) {
-	if strings.TrimSpace(q.database) == "" {
-		return "", errors.New("database cannot be empty for CREATE VIEW queries")
+	if err := validateRequiredField(q.database, "database", "CREATE VIEW"); err != nil {
+		return "", err
 	}
-	if strings.TrimSpace(q.name) == "" {
-		return "", errors.New("name cannot be empty for CREATE VIEW queries")
+	if err := validateRequiredField(q.name, "name", "CREATE VIEW"); err != nil {
+		return "", err
 	}
 	if isNilOrEmpty(q.query) {
 		return "", errors.New("query cannot be empty for CREATE VIEW queries")
@@ -243,9 +241,7 @@ func (q *createViewQueryBuilder) Build() (string, error) {
 		"VIEW",
 		qualifiedIdentifier(q.database, q.name),
 	}
-	if q.clusterName != nil {
-		tokens = append(tokens, "ON", "CLUSTER", quote(*q.clusterName))
-	}
+	tokens = appendClusterClause(tokens, q.clusterName)
 	if len(q.columns) > 0 {
 		signature, err := buildColumnSignatures(q.columns)
 		if err != nil {
@@ -294,11 +290,11 @@ func (q *createMaterializedViewQueryBuilder) WithQuery(query string) CreateMater
 }
 
 func (q *createMaterializedViewQueryBuilder) Build() (string, error) {
-	if strings.TrimSpace(q.database) == "" {
-		return "", errors.New("database cannot be empty for CREATE MATERIALIZED VIEW queries")
+	if err := validateRequiredField(q.database, "database", "CREATE MATERIALIZED VIEW"); err != nil {
+		return "", err
 	}
-	if strings.TrimSpace(q.name) == "" {
-		return "", errors.New("name cannot be empty for CREATE MATERIALIZED VIEW queries")
+	if err := validateRequiredField(q.name, "name", "CREATE MATERIALIZED VIEW"); err != nil {
+		return "", err
 	}
 	if isNilOrEmpty(q.query) {
 		return "", errors.New("query cannot be empty for CREATE MATERIALIZED VIEW queries")
@@ -322,9 +318,7 @@ func (q *createMaterializedViewQueryBuilder) Build() (string, error) {
 		"VIEW",
 		qualifiedIdentifier(q.database, q.name),
 	}
-	if q.clusterName != nil {
-		tokens = append(tokens, "ON", "CLUSTER", quote(*q.clusterName))
-	}
+	tokens = appendClusterClause(tokens, q.clusterName)
 	if len(q.columns) > 0 {
 		definitions, err := buildColumnDefinitions(q.columns)
 		if err != nil {
@@ -354,27 +348,11 @@ func (q *createMaterializedViewQueryBuilder) Build() (string, error) {
 }
 
 func buildColumnDefinitions(columns []ColumnDefinition) ([]string, error) {
-	ret := make([]string, 0, len(columns))
-	for _, column := range columns {
-		definition, err := buildColumnDefinition(column)
-		if err != nil {
-			return nil, err
-		}
-		ret = append(ret, definition)
-	}
-	return ret, nil
+	return buildDefinitions(columns, buildColumnDefinition)
 }
 
 func buildColumnSignatures(columns []ColumnDefinition) ([]string, error) {
-	ret := make([]string, 0, len(columns))
-	for _, column := range columns {
-		signature, err := buildColumnSignature(column)
-		if err != nil {
-			return nil, err
-		}
-		ret = append(ret, signature)
-	}
-	return ret, nil
+	return buildDefinitions(columns, buildColumnSignature)
 }
 
 func buildColumnDefinition(column ColumnDefinition) (string, error) {
@@ -412,22 +390,3 @@ func typeSQL(rawType string, nullable bool, label string) (string, error) {
 	return t, nil
 }
 
-func isNilOrEmpty(value *string) bool {
-	return value == nil || strings.TrimSpace(*value) == ""
-}
-
-func qualifiedIdentifier(parts ...string) string {
-	tokens := make([]string, 0, len(parts))
-	for _, part := range parts {
-		tokens = append(tokens, backtick(strings.TrimSpace(part)))
-	}
-	return strings.Join(tokens, ".")
-}
-
-func rawOrQualifiedIdentifier(value string) string {
-	if strings.ContainsAny(value, "`() ") {
-		return value
-	}
-
-	return qualifiedIdentifier(strings.Split(value, ".")...)
-}
