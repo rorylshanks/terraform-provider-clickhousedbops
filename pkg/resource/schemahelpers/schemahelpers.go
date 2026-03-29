@@ -218,7 +218,18 @@ func DiagnosticsError(diags diag.Diagnostics) error {
 		return nil
 	}
 
-	return errors.New(diags[0].Summary())
+	var parts []string
+	for _, d := range diags {
+		if d.Severity() != diag.SeverityError {
+			continue
+		}
+		msg := d.Summary()
+		if detail := d.Detail(); detail != "" {
+			msg += ": " + detail
+		}
+		parts = append(parts, msg)
+	}
+	return errors.New(strings.Join(parts, "; "))
 }
 
 func DiagnosticsFromErr(summary string, err error) diag.Diagnostics {

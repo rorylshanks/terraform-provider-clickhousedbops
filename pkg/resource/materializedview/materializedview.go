@@ -159,11 +159,9 @@ func (r *Resource) ValidateConfig(ctx context.Context, req resource.ValidateConf
 		return
 	}
 
-	if config.Populate.IsNull() || config.Populate.IsUnknown() || config.ToTable.IsNull() || config.ToTable.IsUnknown() {
-		return
-	}
-
-	if config.Populate.ValueBool() {
+	if !config.Populate.IsNull() && !config.Populate.IsUnknown() &&
+		!config.ToTable.IsNull() && !config.ToTable.IsUnknown() &&
+		config.Populate.ValueBool() {
 		resp.Diagnostics.AddAttributeError(
 			path.Root("populate"),
 			"Invalid Attribute Combination",

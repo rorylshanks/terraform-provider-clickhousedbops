@@ -396,16 +396,20 @@ func buildColumnSignature(column ColumnDefinition) (string, error) {
 }
 
 func columnTypeSQL(column ColumnDefinition) (string, error) {
-	typeSQL := strings.TrimSpace(column.Type)
-	if typeSQL == "" {
-		return "", errors.New("column type cannot be empty")
+	return typeSQL(column.Type, column.Nullable, "column")
+}
+
+func typeSQL(rawType string, nullable bool, label string) (string, error) {
+	t := strings.TrimSpace(rawType)
+	if t == "" {
+		return "", fmt.Errorf("%s type cannot be empty", label)
 	}
 
-	if column.Nullable {
-		return fmt.Sprintf("Nullable(%s)", typeSQL), nil
+	if nullable {
+		return fmt.Sprintf("Nullable(%s)", t), nil
 	}
 
-	return typeSQL, nil
+	return t, nil
 }
 
 func isNilOrEmpty(value *string) bool {

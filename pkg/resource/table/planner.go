@@ -662,24 +662,24 @@ func splitTopLevel(raw string, separator rune) ([]string, error) {
 	var (
 		parts []string
 		start int
-		state sqlScanState
+		state querybuilder.SQLScanState
 	)
 
 	for index := 0; index < len(raw); index++ {
 		ch := raw[index]
 		var err error
-		index, err = advanceSQLScanState(raw, index, &state)
+		index, err = querybuilder.AdvanceSQLScanState(raw, index, &state)
 		if err != nil {
 			return nil, fmt.Errorf("unbalanced SQL fragment %q", raw)
 		}
 
-		if state.isTopLevel() && rune(ch) == separator {
+		if state.IsTopLevel() && rune(ch) == separator {
 			parts = append(parts, raw[start:index])
 			start = index + 1
 		}
 	}
 
-	if !state.isBalanced() {
+	if !state.IsTopLevel() {
 		return nil, fmt.Errorf("unbalanced SQL fragment %q", raw)
 	}
 
@@ -818,15 +818,15 @@ func unwrapOuterParens(value string) string {
 		return value
 	}
 
-	state := sqlScanState{}
+	state := querybuilder.SQLScanState{}
 	for index := 0; index < len(value); index++ {
 		ch := value[index]
 		var err error
-		index, err = advanceSQLScanState(value, index, &state)
+		index, err = querybuilder.AdvanceSQLScanState(value, index, &state)
 		if err != nil {
 			return value
 		}
-		if ch == ')' && state.parenDepth == 0 && index != len(value)-1 {
+		if ch == ')' && state.ParenDepth == 0 && index != len(value)-1 {
 			return value
 		}
 	}
@@ -834,88 +834,6 @@ func unwrapOuterParens(value string) string {
 	return normalizeSQL(value[1 : len(value)-1])
 }
 
-type sqlScanState struct {
-	parenDepth   int
-	bracketDepth int
-	braceDepth   int
-	inQuote      byte
-}
-
-func (s sqlScanState) isTopLevel() bool {
-	return s.inQuote == 0 && s.parenDepth == 0 && s.bracketDepth == 0 && s.braceDepth == 0
-}
-
-func (s sqlScanState) isBalanced() bool {
-	return s.inQuote == 0 && s.parenDepth == 0 && s.bracketDepth == 0 && s.braceDepth == 0
-}
-
-func advanceSQLScanState(raw string, index int, state *sqlScanState) (int, error) {
-	ch := raw[index]
-	if state.inQuote != 0 {
-		switch state.inQuote {
-		case '\'':
-			if ch == '\\' {
-				if index+1 < len(raw) {
-					return index + 1, nil
-				}
-				return index, fmt.Errorf("unterminated escape")
-			}
-			if ch == '\'' {
-				if index+1 < len(raw) && raw[index+1] == '\'' {
-					return index + 1, nil
-				}
-				state.inQuote = 0
-			}
-		case '"':
-			if ch == '\\' {
-				if index+1 < len(raw) {
-					return index + 1, nil
-				}
-				return index, fmt.Errorf("unterminated escape")
-			}
-			if ch == '"' {
-				state.inQuote = 0
-			}
-		case '`':
-			if ch == '\\' {
-				if index+1 < len(raw) {
-					return index + 1, nil
-				}
-				return index, fmt.Errorf("unterminated escape")
-			}
-			if ch == '`' {
-				if index+1 < len(raw) && raw[index+1] == '`' {
-					return index + 1, nil
-				}
-				state.inQuote = 0
-			}
-		}
-		return index, nil
-	}
-
-	switch ch {
-	case '\'', '"', '`':
-		state.inQuote = ch
-	case '(':
-		state.parenDepth++
-	case ')':
-		state.parenDepth--
-	case '[':
-		state.bracketDepth++
-	case ']':
-		state.bracketDepth--
-	case '{':
-		state.braceDepth++
-	case '}':
-		state.braceDepth--
-	}
-
-	if state.parenDepth < 0 || state.bracketDepth < 0 || state.braceDepth < 0 {
-		return index, fmt.Errorf("unbalanced delimiters")
-	}
-
-	return index, nil
-}
 
 func normalizeIdentifier(value string) string {
 	value = normalizeSQL(value)

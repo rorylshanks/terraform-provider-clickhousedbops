@@ -52,6 +52,10 @@ func NewDropView(database string, name string) DropQueryBuilder {
 	return newDropQualified(resourceTypeView, database, name)
 }
 
+func NewDropMaterializedView(database string, name string) DropQueryBuilder {
+	return newDropQualified(resourceTypeTable, database, name)
+}
+
 func NewDropSettingsProfile(resourceName string) DropQueryBuilder {
 	return newDrop(resourceTypeSettingsProfile, resourceName)
 }
@@ -85,7 +89,7 @@ func newDropQualified(resourceTypeName string, database string, name string) Dro
 
 func (q *dropQueryBuilder) Build() (string, error) {
 	if q.resourceName == "" && q.resourceNameSQL == "" {
-		return "", errors.New("resourceName cannot be empty for CREATE and DROP queries")
+		return "", errors.New("resourceName cannot be empty for DROP queries")
 	}
 
 	resourceNameSQL := q.resourceNameSQL

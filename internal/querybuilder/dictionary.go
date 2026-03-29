@@ -231,14 +231,5 @@ func buildDictionaryAttributeDefinition(attribute DictionaryAttributeDefinition)
 }
 
 func dictionaryAttributeTypeSQL(attribute DictionaryAttributeDefinition) (string, error) {
-	typeSQL := strings.TrimSpace(attribute.Type)
-	if typeSQL == "" {
-		return "", errors.New("dictionary attribute type cannot be empty")
-	}
-
-	if attribute.Nullable {
-		return fmt.Sprintf("Nullable(%s)", typeSQL), nil
-	}
-
-	return typeSQL, nil
+	return typeSQL(attribute.Type, attribute.Nullable, "dictionary attribute")
 }

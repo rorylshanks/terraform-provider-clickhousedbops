@@ -294,7 +294,7 @@ func (i *impl) DeleteMaterializedView(ctx context.Context, database string, name
 		return nil
 	}
 
-	sql, err := querybuilder.NewDropView(database, name).WithCluster(clusterName).Build()
+	sql, err := querybuilder.NewDropMaterializedView(database, name).WithCluster(clusterName).Build()
 	if err != nil {
 		return errors.WithMessage(err, "error building query")
 	}
@@ -552,14 +552,14 @@ func findNextCreateTableClause(raw string, start int) *createTableClause {
 }
 
 func findTopLevelKeyword(raw string, keyword string, start int) int {
-	state := createTableScanState{}
+	state := querybuilder.SQLScanState{}
 	for index := 0; index < len(raw); index++ {
 		var err error
-		index, err = advanceCreateTableScanState(raw, index, &state)
+		index, err = querybuilder.AdvanceSQLScanState(raw, index, &state)
 		if err != nil {
 			return -1
 		}
-		if index < start || !state.isTopLevel() {
+		if index < start || !state.IsTopLevel() {
 			continue
 		}
 		if !strings.HasPrefix(raw[index:], keyword) {
@@ -593,98 +593,19 @@ func unwrapNullableType(raw string) (string, bool) {
 	}
 
 	inner := raw[len("Nullable(") : len(raw)-1]
-	state := createTableScanState{parenDepth: 1}
-	for index := 0; index < len(raw); index++ {
+	state := querybuilder.SQLScanState{}
+	for index := 0; index < len(inner); index++ {
 		var err error
-		index, err = advanceCreateTableScanState(raw, index, &state)
+		index, err = querybuilder.AdvanceSQLScanState(inner, index, &state)
 		if err != nil {
 			return raw, false
 		}
-		if raw[index] == ')' && state.parenDepth == 0 && index != len(raw)-1 {
-			return raw, false
-		}
+	}
+	if !state.IsTopLevel() {
+		return raw, false
 	}
 
 	return strings.TrimSpace(inner), true
-}
-
-type createTableScanState struct {
-	parenDepth   int
-	bracketDepth int
-	braceDepth   int
-	inQuote      byte
-}
-
-func (s createTableScanState) isTopLevel() bool {
-	return s.inQuote == 0 && s.parenDepth == 0 && s.bracketDepth == 0 && s.braceDepth == 0
-}
-
-func advanceCreateTableScanState(raw string, index int, state *createTableScanState) (int, error) {
-	ch := raw[index]
-	if state.inQuote != 0 {
-		switch state.inQuote {
-		case '\'':
-			if ch == '\\' {
-				if index+1 < len(raw) {
-					return index + 1, nil
-				}
-				return index, errors.New("unterminated escape")
-			}
-			if ch == '\'' {
-				if index+1 < len(raw) && raw[index+1] == '\'' {
-					return index + 1, nil
-				}
-				state.inQuote = 0
-			}
-		case '"':
-			if ch == '\\' {
-				if index+1 < len(raw) {
-					return index + 1, nil
-				}
-				return index, errors.New("unterminated escape")
-			}
-			if ch == '"' {
-				state.inQuote = 0
-			}
-		case '`':
-			if ch == '\\' {
-				if index+1 < len(raw) {
-					return index + 1, nil
-				}
-				return index, errors.New("unterminated escape")
-			}
-			if ch == '`' {
-				if index+1 < len(raw) && raw[index+1] == '`' {
-					return index + 1, nil
-				}
-				state.inQuote = 0
-			}
-		}
-		return index, nil
-	}
-
-	switch ch {
-	case '\'', '"', '`':
-		state.inQuote = ch
-	case '(':
-		state.parenDepth++
-	case ')':
-		state.parenDepth--
-	case '[':
-		state.bracketDepth++
-	case ']':
-		state.bracketDepth--
-	case '{':
-		state.braceDepth++
-	case '}':
-		state.braceDepth--
-	}
-
-	if state.parenDepth < 0 || state.bracketDepth < 0 || state.braceDepth < 0 {
-		return index, errors.New("unbalanced delimiters")
-	}
-
-	return index, nil
 }
 
 func toQueryBuilderColumns(columns []Column) []querybuilder.ColumnDefinition {

@@ -138,8 +138,11 @@ func BuildRemoveColumnExpressionAction(name string, kind ColumnExpressionKind) (
 	if name == "" {
 		return "", errors.New("column name cannot be empty")
 	}
-	if kind == "" {
-		return "", errors.New("column expression kind cannot be empty")
+
+	switch kind {
+	case ColumnExpressionKindDefault, ColumnExpressionKindMaterialized, ColumnExpressionKindAlias:
+	default:
+		return "", fmt.Errorf("unsupported column expression kind: %q", kind)
 	}
 
 	return fmt.Sprintf("MODIFY COLUMN %s REMOVE %s", backtick(name), string(kind)), nil

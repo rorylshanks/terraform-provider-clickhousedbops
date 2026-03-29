@@ -467,9 +467,6 @@ func syncManagedEquivalentString(current types.String, remote string, equal func
 		return current
 	}
 	if current.IsNull() || (!current.IsUnknown() && normalizeSQL(current.ValueString()) == "") {
-		if normalizeSQL(remote) == "" {
-			return current
-		}
 		return current
 	}
 	if normalizeSQL(remote) == "" {
