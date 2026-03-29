@@ -1,110 +1,121 @@
 package querybuilder
 
-import (
-	"testing"
-)
+import "testing"
 
 func Test_drop(t *testing.T) {
 	cluster := "cluster1"
 
 	tests := []struct {
-		name         string
-		action       string
-		resourceType string
-		resourceName string
-		comment      string
-		identified   string
-		clusterName  *string
-		want         string
-		wantErr      bool
+		name    string
+		builder DropQueryBuilder
+		want    string
+		wantErr bool
 	}{
 		{
-			name:         "Drop database",
-			resourceType: resourceTypeDatabase,
-			resourceName: "db1",
-			want:         "DROP DATABASE `db1`;",
-			wantErr:      false,
+			name:    "Drop dictionary on cluster",
+			builder: NewDropDictionary("db1", "dict1").WithCluster(&cluster),
+			want:    "DROP DICTIONARY `db1`.`dict1` ON CLUSTER 'cluster1';",
 		},
 		{
-			name:         "Drop database on cluster",
-			resourceType: resourceTypeDatabase,
-			resourceName: "db1",
-			clusterName:  &cluster,
-			want:         "DROP DATABASE `db1` ON CLUSTER 'cluster1';",
-			wantErr:      false,
+			name:    "Drop table",
+			builder: NewDropTable("db1", "tbl1"),
+			want:    "DROP TABLE `db1`.`tbl1`;",
 		},
 		{
-			name:         "Drop database with complex name",
-			resourceType: resourceTypeDatabase,
-			resourceName: "data`base",
-			want:         "DROP DATABASE `data\\`base`;",
-			wantErr:      false,
+			name:    "Drop view",
+			builder: NewDropView("db1", "view1"),
+			want:    "DROP VIEW `db1`.`view1`;",
 		},
 		{
-			name:         "Fail to create role with empty name",
-			resourceType: resourceTypeRole,
-			resourceName: "",
-			want:         "",
-			wantErr:      true,
+			name:    "Drop database",
+			builder: NewDropDatabase("db1"),
+			want:    "DROP DATABASE `db1`;",
 		},
 		{
-			name:         "Drop role with simple name",
-			resourceType: resourceTypeRole,
-			resourceName: "role1",
-			want:         "DROP ROLE `role1`;",
-			wantErr:      false,
+			name:    "Drop database on cluster",
+			builder: NewDropDatabase("db1").WithCluster(&cluster),
+			want:    "DROP DATABASE `db1` ON CLUSTER 'cluster1';",
 		},
 		{
-			name:         "Drop role with complex name",
-			resourceType: resourceTypeRole,
-			resourceName: "ro`le1",
-			want:         "DROP ROLE `ro\\`le1`;",
-			wantErr:      false,
+			name:    "Drop database with complex name",
+			builder: NewDropDatabase("data`base"),
+			want:    "DROP DATABASE `data\\`base`;",
 		},
 		{
-			name:         "Fail to drop role with empty name",
-			resourceType: resourceTypeRole,
-			resourceName: "",
-			want:         "",
-			wantErr:      true,
+			name:    "Fail to create role with empty name",
+			builder: NewDropRole(""),
+			wantErr: true,
 		},
 		{
-			name:         "Drop user with simple name",
-			resourceType: resourceTypeUser,
-			resourceName: "john",
-			want:         "DROP USER `john`;",
-			wantErr:      false,
+			name:    "Drop role with simple name",
+			builder: NewDropRole("role1"),
+			want:    "DROP ROLE `role1`;",
 		},
 		{
-			name:         "Drop user with complex name",
-			resourceType: resourceTypeUser,
-			resourceName: "jo`hn",
-			want:         "DROP USER `jo\\`hn`;",
-			wantErr:      false,
+			name:    "Drop role on cluster",
+			builder: NewDropRole("role1").WithCluster(&cluster),
+			want:    "DROP ROLE `role1` ON CLUSTER 'cluster1';",
 		},
 		{
-			name:         "Fail to drop user with empty name",
-			resourceType: resourceTypeUser,
-			resourceName: "",
-			want:         "",
-			wantErr:      true,
+			name:    "Drop role with complex name",
+			builder: NewDropRole("ro`le1"),
+			want:    "DROP ROLE `ro\\`le1`;",
+		},
+		{
+			name:    "Fail to drop user with empty name",
+			builder: NewDropUser(""),
+			wantErr: true,
+		},
+		{
+			name:    "Drop user with simple name",
+			builder: NewDropUser("john"),
+			want:    "DROP USER `john`;",
+		},
+		{
+			name:    "Drop user with complex name",
+			builder: NewDropUser("jo`hn"),
+			want:    "DROP USER `jo\\`hn`;",
+		},
+		{
+			name:    "Fail to drop dictionary with empty database",
+			builder: NewDropDictionary("", "dict1"),
+			wantErr: true,
+		},
+		{
+			name:    "Fail to drop dictionary with empty name",
+			builder: NewDropDictionary("db1", ""),
+			wantErr: true,
+		},
+		{
+			name:    "Fail to drop table with empty database",
+			builder: NewDropTable("", "tbl1"),
+			wantErr: true,
+		},
+		{
+			name:    "Fail to drop table with empty name",
+			builder: NewDropTable("db1", ""),
+			wantErr: true,
+		},
+		{
+			name:    "Fail to drop view with empty database",
+			builder: NewDropView("", "view1"),
+			wantErr: true,
+		},
+		{
+			name:    "Fail to drop view with empty name",
+			builder: NewDropView("db1", ""),
+			wantErr: true,
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			q := dropQueryBuilder{
-				resourceTypeName: tt.resourceType,
-				resourceName:     tt.resourceName,
-				clusterName:      tt.clusterName,
-			}
-
-			got, err := q.Build()
+			got, err := tt.builder.Build()
 			if (err != nil) != tt.wantErr {
-				t.Errorf("Build() error = %v, wantErr %v", err, tt.wantErr)
-				return
+				t.Fatalf("Build() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if got != tt.want {
-				t.Errorf("Build() got = %v, want %v", got, tt.want)
+				t.Fatalf("Build() got = %v, want %v", got, tt.want)
 			}
 		})
 	}

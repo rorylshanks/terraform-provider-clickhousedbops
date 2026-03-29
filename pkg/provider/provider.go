@@ -18,13 +18,17 @@ import (
 	"github.com/ClickHouse/terraform-provider-clickhousedbops/internal/dbops"
 	"github.com/ClickHouse/terraform-provider-clickhousedbops/pkg/project"
 	"github.com/ClickHouse/terraform-provider-clickhousedbops/pkg/resource/database"
+	"github.com/ClickHouse/terraform-provider-clickhousedbops/pkg/resource/dictionary"
 	"github.com/ClickHouse/terraform-provider-clickhousedbops/pkg/resource/grantprivilege"
 	"github.com/ClickHouse/terraform-provider-clickhousedbops/pkg/resource/grantrole"
+	"github.com/ClickHouse/terraform-provider-clickhousedbops/pkg/resource/materializedview"
 	"github.com/ClickHouse/terraform-provider-clickhousedbops/pkg/resource/role"
 	"github.com/ClickHouse/terraform-provider-clickhousedbops/pkg/resource/setting"
 	"github.com/ClickHouse/terraform-provider-clickhousedbops/pkg/resource/settingsprofile"
 	"github.com/ClickHouse/terraform-provider-clickhousedbops/pkg/resource/settingsprofileassociation"
+	"github.com/ClickHouse/terraform-provider-clickhousedbops/pkg/resource/table"
 	"github.com/ClickHouse/terraform-provider-clickhousedbops/pkg/resource/user"
+	"github.com/ClickHouse/terraform-provider-clickhousedbops/pkg/resource/view"
 )
 
 const (
@@ -281,6 +285,10 @@ func (p *Provider) Configure(ctx context.Context, req provider.ConfigureRequest,
 func (p *Provider) Resources(ctx context.Context) []func() tfresource.Resource {
 	return []func() tfresource.Resource{
 		database.NewResource,
+		dictionary.NewResource,
+		table.NewResource,
+		view.NewResource,
+		materializedview.NewResource,
 		role.NewResource,
 		user.NewResource,
 		grantrole.NewResource,

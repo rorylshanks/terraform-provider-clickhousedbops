@@ -11,6 +11,25 @@ type Client interface {
 	DeleteDatabase(ctx context.Context, uuid string, clusterName *string) error
 	FindDatabaseByName(ctx context.Context, name string, clusterName *string) (*Database, error)
 
+	CreateDictionary(ctx context.Context, dictionary Dictionary, clusterName *string) (*Dictionary, error)
+	GetDictionary(ctx context.Context, database string, name string, clusterName *string) (*Dictionary, error)
+	DeleteDictionary(ctx context.Context, database string, name string, clusterName *string) error
+
+	CreateTable(ctx context.Context, table Table, clusterName *string) (*Table, error)
+	GetTable(ctx context.Context, database string, name string, clusterName *string) (*Table, error)
+	DeleteTable(ctx context.Context, database string, name string, clusterName *string) error
+	AlterTable(ctx context.Context, database string, name string, clusterName *string, actions []string) error
+	GetTableEngineCapabilities(ctx context.Context, engine string) (TableEngineCapabilities, error)
+	GetTableSettingCapabilities(ctx context.Context, engine string, settingNames []string) (map[string]TableSettingCapability, error)
+
+	CreateView(ctx context.Context, view View, clusterName *string) (*View, error)
+	GetView(ctx context.Context, database string, name string, clusterName *string) (*View, error)
+	DeleteView(ctx context.Context, database string, name string, clusterName *string) error
+
+	CreateMaterializedView(ctx context.Context, view MaterializedView, clusterName *string) (*MaterializedView, error)
+	GetMaterializedView(ctx context.Context, database string, name string, clusterName *string) (*MaterializedView, error)
+	DeleteMaterializedView(ctx context.Context, database string, name string, clusterName *string) error
+
 	CreateRole(ctx context.Context, role Role, clusterName *string) (*Role, error)
 	GetRole(ctx context.Context, id string, clusterName *string) (*Role, error)
 	DeleteRole(ctx context.Context, id string, clusterName *string) error

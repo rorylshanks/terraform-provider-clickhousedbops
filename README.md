@@ -9,6 +9,10 @@ This is the official Terraform provider for ClickHouse database operations.
 With this Terraform provider you can:
 
 - Manage `databases` in a `ClickHouse` instance using the `clickhousedbops_database` resource
+- Manage `dictionaries` in a `ClickHouse` instance using the `clickhousedbops_dictionary` resource
+- Manage `tables` in a `ClickHouse` instance using the `clickhousedbops_table` resource
+- Manage `views` in a `ClickHouse` instance using the `clickhousedbops_view` resource
+- Manage `materialized views` in a `ClickHouse` instance using the `clickhousedbops_materialized_view` resource
 - Manage `users` in a `ClickHouse` instance using the `clickhousedbops_user` resource
 - Manage `roles` in a `ClickHouse` instance using the `clickhousedbops_role` resource
 - Manage `role grants` in a `ClickHouse` instance using the `clickhousedbops_grant_role` resource
@@ -29,4 +33,3 @@ Please read the [Migration guide](https://github.com/ClickHouse/terraform-provid
 ## Development and contributing
 
 Please read the [Development readme](https://github.com/ClickHouse/terraform-provider-clickhousedbops/blob/main/development/README.md)
-

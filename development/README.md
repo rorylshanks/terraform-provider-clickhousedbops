@@ -50,6 +50,21 @@ If you made any changes to the provider's interface, please run `make docs` to u
 
 NOTE: this is done automatically by git hooks.
 
+## Local schema tests
+
+The schema-management resources use the existing acceptance-test ClickHouse harness under [`tests/docker-compose.yaml`](../tests/docker-compose.yaml). Run the new local tests with:
+
+```bash
+make tftest RESOURCE=dictionary
+make tftest RESOURCE=table
+make tftest RESOURCE=view
+make tftest RESOURCE=materializedview
+```
+
+These tests exercise shared Terraform locals across managed databases, dictionaries, tables, views, and materialized views.
+
+Kafka tables are supported by the generic `clickhousedbops_table` resource because the engine clause is raw ClickHouse SQL. The automated acceptance suite currently validates that through DDL builder unit tests; if you want a full end-to-end Kafka check locally, add a broker to the compose stack and point the table engine at that broker.
+
 ## Release
 
 NOTE: Release process is only possible for ClickHouse employees.

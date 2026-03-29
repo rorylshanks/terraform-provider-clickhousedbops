@@ -8,8 +8,11 @@ import (
 
 const (
 	resourceTypeDatabase        = "DATABASE"
+	resourceTypeDictionary      = "DICTIONARY"
+	resourceTypeTable           = "TABLE"
 	resourceTypeRole            = "ROLE"
 	resourceTypeUser            = "USER"
+	resourceTypeView            = "VIEW"
 	resourceTypeSettingsProfile = "SETTINGS PROFILE"
 )
 
@@ -21,6 +24,7 @@ type DropQueryBuilder interface {
 type dropQueryBuilder struct {
 	resourceTypeName string
 	resourceName     string
+	resourceNameSQL  string
 	clusterName      *string
 }
 
@@ -32,8 +36,20 @@ func NewDropDatabase(resourceName string) DropQueryBuilder {
 	return newDrop(resourceTypeDatabase, resourceName)
 }
 
+func NewDropDictionary(database string, name string) DropQueryBuilder {
+	return newDropQualified(resourceTypeDictionary, database, name)
+}
+
+func NewDropTable(database string, name string) DropQueryBuilder {
+	return newDropQualified(resourceTypeTable, database, name)
+}
+
 func NewDropUser(resourceName string) DropQueryBuilder {
 	return newDrop(resourceTypeUser, resourceName)
+}
+
+func NewDropView(database string, name string) DropQueryBuilder {
+	return newDropQualified(resourceTypeView, database, name)
 }
 
 func NewDropSettingsProfile(resourceName string) DropQueryBuilder {
@@ -48,19 +64,39 @@ func (q *dropQueryBuilder) WithCluster(clusterName *string) DropQueryBuilder {
 func newDrop(resourceTypeName string, resourceName string) DropQueryBuilder {
 	return &dropQueryBuilder{
 		resourceTypeName: resourceTypeName,
-		resourceName:     resourceName,
+		resourceName:     strings.TrimSpace(resourceName),
+	}
+}
+
+func newDropQualified(resourceTypeName string, database string, name string) DropQueryBuilder {
+	database = strings.TrimSpace(database)
+	name = strings.TrimSpace(name)
+
+	resourceNameSQL := ""
+	if database != "" && name != "" {
+		resourceNameSQL = qualifiedIdentifier(database, name)
+	}
+
+	return &dropQueryBuilder{
+		resourceTypeName: resourceTypeName,
+		resourceNameSQL:  resourceNameSQL,
 	}
 }
 
 func (q *dropQueryBuilder) Build() (string, error) {
-	if q.resourceName == "" {
+	if q.resourceName == "" && q.resourceNameSQL == "" {
 		return "", errors.New("resourceName cannot be empty for CREATE and DROP queries")
+	}
+
+	resourceNameSQL := q.resourceNameSQL
+	if resourceNameSQL == "" {
+		resourceNameSQL = backtick(q.resourceName)
 	}
 
 	tokens := []string{
 		"DROP",
 		q.resourceTypeName,
-		backtick(q.resourceName),
+		resourceNameSQL,
 	}
 
 	if q.clusterName != nil {

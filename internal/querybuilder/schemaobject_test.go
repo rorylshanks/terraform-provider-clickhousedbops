@@ -1,0 +1,168 @@
+package querybuilder
+
+import "testing"
+
+func Test_createTable(t *testing.T) {
+	clusterName := "cluster1"
+	comment := "event name"
+	defaultExpr := "now()"
+
+	got, err := NewCreateTable("posthog", "events").
+		WithCluster(&clusterName).
+		WithColumns([]ColumnDefinition{
+			{Name: "team_id", Type: "UInt64"},
+			{Name: "event", Type: "String", Comment: &comment},
+			{Name: "created_at", Type: "DateTime", DefaultExpression: &defaultExpr},
+			{Name: "browser", Type: "String", Nullable: true},
+		}).
+		WithEngine("MergeTree()").
+		WithPartitionBy("toYYYYMM(created_at)").
+		WithOrderBy("(team_id, created_at)").
+		WithSettings("index_granularity = 8192").
+		Build()
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+
+	want := "CREATE TABLE `posthog`.`events` ON CLUSTER 'cluster1' (`team_id` UInt64, `event` String COMMENT 'event name', `created_at` DateTime DEFAULT now(), `browser` Nullable(String)) ENGINE = MergeTree() PARTITION BY toYYYYMM(created_at) ORDER BY (team_id, created_at) SETTINGS index_granularity = 8192;"
+	if got != want {
+		t.Fatalf("Build() got = %v, want %v", got, want)
+	}
+}
+
+func Test_createTableWithKafkaEngine(t *testing.T) {
+	got, err := NewCreateTable("posthog", "kafka_events").
+		WithColumns([]ColumnDefinition{
+			{Name: "event", Type: "String"},
+		}).
+		WithEngine("Kafka('redpanda:9092', 'events', 'events_consumer', 'JSONEachRow')").
+		WithSettings("kafka_num_consumers = 1").
+		Build()
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+
+	want := "CREATE TABLE `posthog`.`kafka_events` (`event` String) ENGINE = Kafka('redpanda:9092', 'events', 'events_consumer', 'JSONEachRow') SETTINGS kafka_num_consumers = 1;"
+	if got != want {
+		t.Fatalf("Build() got = %v, want %v", got, want)
+	}
+}
+
+func Test_createTableRejectsMultipleColumnExpressions(t *testing.T) {
+	defaultExpr := "now()"
+	aliasExpr := "created_at"
+
+	_, err := NewCreateTable("posthog", "events").
+		WithColumns([]ColumnDefinition{
+			{
+				Name:              "created_at",
+				Type:              "DateTime",
+				DefaultExpression: &defaultExpr,
+				AliasExpression:   &aliasExpr,
+			},
+		}).
+		WithEngine("MergeTree()").
+		Build()
+	if err == nil {
+		t.Fatal("expected Build() to fail when multiple column expressions are set")
+	}
+}
+
+func Test_alterTable(t *testing.T) {
+	comment := "human-readable"
+	addAction, err := BuildAddColumnAction(ColumnDefinition{Name: "extra", Type: "UInt64", Comment: &comment}, AfterColumnPosition("event"))
+	if err != nil {
+		t.Fatalf("BuildAddColumnAction() error = %v", err)
+	}
+	orderByAction, err := BuildModifyOrderByAction("(team_id, extra)")
+	if err != nil {
+		t.Fatalf("BuildModifyOrderByAction() error = %v", err)
+	}
+
+	sql, err := BuildAlterTable("posthog", "events", nil, []string{
+		addAction,
+		orderByAction,
+	})
+	if err != nil {
+		t.Fatalf("BuildAlterTable() error = %v", err)
+	}
+
+	want := "ALTER TABLE `posthog`.`events` ADD COLUMN `extra` UInt64 COMMENT 'human-readable' AFTER `event`, MODIFY ORDER BY (team_id, extra);"
+	if sql != want {
+		t.Fatalf("BuildAlterTable() got = %v, want %v", sql, want)
+	}
+}
+
+func Test_modifySettingAction(t *testing.T) {
+	got, err := BuildModifySettingAction("ttl_only_drop_parts", "1")
+	if err != nil {
+		t.Fatalf("BuildModifySettingAction() error = %v", err)
+	}
+
+	want := "MODIFY SETTING `ttl_only_drop_parts` = 1"
+	if got != want {
+		t.Fatalf("BuildModifySettingAction() got = %v, want %v", got, want)
+	}
+}
+
+func Test_createView(t *testing.T) {
+	got, err := NewCreateView("posthog", "team_event_counts").
+		WithColumns([]ColumnDefinition{
+			{Name: "team_id", Type: "UInt64"},
+			{Name: "event_count", Type: "UInt64"},
+		}).
+		WithQuery("SELECT team_id, count() AS event_count FROM posthog.events GROUP BY team_id").
+		Build()
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+
+	want := "CREATE VIEW `posthog`.`team_event_counts` (`team_id` UInt64, `event_count` UInt64) AS SELECT team_id, count() AS event_count FROM posthog.events GROUP BY team_id;"
+	if got != want {
+		t.Fatalf("Build() got = %v, want %v", got, want)
+	}
+}
+
+func Test_createMaterializedViewToTable(t *testing.T) {
+	got, err := NewCreateMaterializedView("posthog", "events_mv").
+		WithToTable("posthog.daily_event_counts").
+		WithToColumns([]ColumnDefinition{
+			{Name: "team_id", Type: "UInt64"},
+			{Name: "event_date", Type: "Date"},
+			{Name: "event_count", Type: "UInt64"},
+		}).
+		WithQuery("SELECT team_id, toDate(created_at) AS event_date, count() AS event_count FROM posthog.events GROUP BY team_id, event_date").
+		Build()
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+
+	want := "CREATE MATERIALIZED VIEW `posthog`.`events_mv` TO `posthog`.`daily_event_counts` (`team_id` UInt64, `event_date` Date, `event_count` UInt64) AS SELECT team_id, toDate(created_at) AS event_date, count() AS event_count FROM posthog.events GROUP BY team_id, event_date;"
+	if got != want {
+		t.Fatalf("Build() got = %v, want %v", got, want)
+	}
+}
+
+func Test_createMaterializedViewRequiresExactlyOneTargetMode(t *testing.T) {
+	_, err := NewCreateMaterializedView("posthog", "events_mv").
+		WithEngine("MergeTree()").
+		WithToTable("posthog.daily_event_counts").
+		WithQuery("SELECT 1").
+		Build()
+	if err == nil {
+		t.Fatal("expected Build() to fail when both engine and to_table are set")
+	}
+}
+
+func Test_createMaterializedViewRejectsColumnsWithToTable(t *testing.T) {
+	_, err := NewCreateMaterializedView("posthog", "events_mv").
+		WithColumns([]ColumnDefinition{
+			{Name: "team_id", Type: "UInt64"},
+		}).
+		WithToTable("posthog.daily_event_counts").
+		WithQuery("SELECT 1").
+		Build()
+	if err == nil {
+		t.Fatal("expected Build() to fail when columns are set for a TO-backed materialized view")
+	}
+}
