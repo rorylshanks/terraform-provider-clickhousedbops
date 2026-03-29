@@ -27,6 +27,16 @@ func Test_drop(t *testing.T) {
 			want:    "DROP VIEW `db1`.`view1`;",
 		},
 		{
+			name:    "Drop materialized view",
+			builder: NewDropMaterializedView("db1", "mv1"),
+			want:    "DROP VIEW `db1`.`mv1`;",
+		},
+		{
+			name:    "Drop materialized view on cluster",
+			builder: NewDropMaterializedView("db1", "mv1").WithCluster(&cluster),
+			want:    "DROP VIEW `db1`.`mv1` ON CLUSTER 'cluster1';",
+		},
+		{
 			name:    "Drop database",
 			builder: NewDropDatabase("db1"),
 			want:    "DROP DATABASE `db1`;",

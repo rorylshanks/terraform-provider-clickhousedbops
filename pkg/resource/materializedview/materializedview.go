@@ -270,16 +270,9 @@ func expandMaterializedViewModel(ctx context.Context, plan MaterializedViewResou
 		return dbops.MaterializedView{}, schemahelpers.DiagnosticsError(diags)
 	}
 
-	if !plan.ToColumns.IsNull() && plan.ToTable.IsNull() {
-		return dbops.MaterializedView{}, fmt.Errorf("to_columns can only be set when to_table is set")
-	}
-
 	populate := false
 	if !plan.Populate.IsNull() {
 		populate = plan.Populate.ValueBool()
-	}
-	if populate && !plan.ToTable.IsNull() {
-		return dbops.MaterializedView{}, fmt.Errorf("populate can only be set for engine-backed materialized views")
 	}
 
 	return dbops.MaterializedView{

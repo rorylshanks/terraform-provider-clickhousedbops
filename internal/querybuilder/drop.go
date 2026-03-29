@@ -53,7 +53,7 @@ func NewDropView(database string, name string) DropQueryBuilder {
 }
 
 func NewDropMaterializedView(database string, name string) DropQueryBuilder {
-	return newDropQualified(resourceTypeTable, database, name)
+	return newDropQualified(resourceTypeView, database, name)
 }
 
 func NewDropSettingsProfile(resourceName string) DropQueryBuilder {

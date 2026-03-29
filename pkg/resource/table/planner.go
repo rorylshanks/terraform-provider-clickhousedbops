@@ -709,21 +709,7 @@ func columnPositionFor(previousName string) *querybuilder.ColumnPosition {
 }
 
 func toQueryBuilderColumn(column dbops.Column) querybuilder.ColumnDefinition {
-	var comment *string
-	if normalizeSQL(column.Comment) != "" {
-		value := column.Comment
-		comment = &value
-	}
-
-	return querybuilder.ColumnDefinition{
-		Name:                   column.Name,
-		Type:                   column.Type,
-		Nullable:               column.Nullable,
-		Comment:                comment,
-		DefaultExpression:      column.DefaultExpression,
-		MaterializedExpression: column.MaterializedExpression,
-		AliasExpression:        column.AliasExpression,
-	}
+	return dbops.ToQueryBuilderColumn(column)
 }
 
 func extractColumnExpression(column dbops.Column) columnExpression {

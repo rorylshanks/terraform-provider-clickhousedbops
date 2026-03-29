@@ -829,6 +829,24 @@ func unwrapNullableType(raw string) (string, bool) {
 	return strings.TrimSpace(inner), true
 }
 
+// ToQueryBuilderColumn converts a single Column to a querybuilder.ColumnDefinition.
+func ToQueryBuilderColumn(column Column) querybuilder.ColumnDefinition {
+	var comment *string
+	if column.Comment != "" {
+		comment = &column.Comment
+	}
+
+	return querybuilder.ColumnDefinition{
+		Name:                   column.Name,
+		Type:                   column.Type,
+		Nullable:               column.Nullable,
+		Comment:                comment,
+		DefaultExpression:      column.DefaultExpression,
+		MaterializedExpression: column.MaterializedExpression,
+		AliasExpression:        column.AliasExpression,
+	}
+}
+
 func toQueryBuilderColumns(columns []Column) []querybuilder.ColumnDefinition {
 	if len(columns) == 0 {
 		return nil
@@ -836,20 +854,7 @@ func toQueryBuilderColumns(columns []Column) []querybuilder.ColumnDefinition {
 
 	ret := make([]querybuilder.ColumnDefinition, 0, len(columns))
 	for _, column := range columns {
-		var comment *string
-		if column.Comment != "" {
-			comment = &column.Comment
-		}
-
-		ret = append(ret, querybuilder.ColumnDefinition{
-			Name:                   column.Name,
-			Type:                   column.Type,
-			Nullable:               column.Nullable,
-			Comment:                comment,
-			DefaultExpression:      column.DefaultExpression,
-			MaterializedExpression: column.MaterializedExpression,
-			AliasExpression:        column.AliasExpression,
-		})
+		ret = append(ret, ToQueryBuilderColumn(column))
 	}
 
 	return ret
