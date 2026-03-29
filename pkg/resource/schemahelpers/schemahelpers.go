@@ -201,6 +201,23 @@ func ColumnsValue(ctx context.Context, columns []dbops.Column) (types.List, diag
 	return types.ListValueFrom(ctx, types.ObjectType{AttrTypes: columnObjectAttrTypes()}, models)
 }
 
+func ColumnSignaturesValue(ctx context.Context, columns []dbops.Column) (types.List, diag.Diagnostics) {
+	if len(columns) == 0 {
+		return types.ListNull(types.ObjectType{AttrTypes: columnSignatureObjectAttrTypes()}), nil
+	}
+
+	models := make([]ColumnSignatureModel, 0, len(columns))
+	for _, column := range columns {
+		models = append(models, ColumnSignatureModel{
+			Name:     types.StringValue(column.Name),
+			Type:     types.StringValue(column.Type),
+			Nullable: types.BoolValue(column.Nullable),
+		})
+	}
+
+	return types.ListValueFrom(ctx, types.ObjectType{AttrTypes: columnSignatureObjectAttrTypes()}, models)
+}
+
 func QualifiedName(database string, name string) string {
 	return fmt.Sprintf("%s.%s", database, name)
 }
@@ -283,6 +300,14 @@ func columnObjectAttrTypes() map[string]attr.Type {
 		"default_expression":      types.StringType,
 		"materialized_expression": types.StringType,
 		"alias_expression":        types.StringType,
+	}
+}
+
+func columnSignatureObjectAttrTypes() map[string]attr.Type {
+	return map[string]attr.Type{
+		"name":     types.StringType,
+		"type":     types.StringType,
+		"nullable": types.BoolType,
 	}
 }
 

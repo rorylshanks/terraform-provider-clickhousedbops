@@ -146,3 +146,22 @@ func TestSyncTableStateIgnoresImplicitPrimaryKeyWhenUnset(t *testing.T) {
 		t.Fatalf("expected implicit primary key to be ignored, got %q", state.PrimaryKey.ValueString())
 	}
 }
+
+func TestSyncTableStatePreservesManagedAsSelectWhenRemoteOmitsIt(t *testing.T) {
+	ctx := context.Background()
+	state := TableResourceModel{
+		AsSelect: types.StringValue("SELECT * FROM source_table"),
+	}
+
+	remote := &dbops.Table{
+		AsSelect: "",
+	}
+
+	diags := syncTableState(ctx, &state, remote, nil)
+	if diags.HasError() {
+		t.Fatalf("syncTableState() diagnostics = %v", diags)
+	}
+	if state.AsSelect.ValueString() != "SELECT * FROM source_table" {
+		t.Fatalf("expected as_select to preserve prior text, got %q", state.AsSelect.ValueString())
+	}
+}

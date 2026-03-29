@@ -437,7 +437,7 @@ func syncTableState(ctx context.Context, state *TableResourceModel, table *dbops
 	state.SampleBy = syncEquivalentString(state.SampleBy, table.SampleBy, expressionsEqual)
 	state.TTL = syncEquivalentString(state.TTL, table.TTL, ttlExpressionsEqual)
 	state.Settings = syncRemoteSettings(state.Settings, table.Settings, settingCapabilities)
-	state.AsSelect = syncEquivalentString(state.AsSelect, table.AsSelect, expressionsEqual)
+	state.AsSelect = syncManagedAsSelect(state.AsSelect, table.AsSelect)
 
 	currentColumns, columnDiags := schemahelpers.ExpandColumns(ctx, state.Columns)
 	diags.Append(columnDiags...)
@@ -473,6 +473,13 @@ func syncManagedEquivalentString(current types.String, remote string, equal func
 		return types.StringNull()
 	}
 	return types.StringValue(remote)
+}
+
+func syncManagedAsSelect(current types.String, remote string) types.String {
+	if normalizeSQL(remote) == "" && !current.IsNull() && !current.IsUnknown() && normalizeSQL(current.ValueString()) != "" {
+		return current
+	}
+	return syncEquivalentString(current, remote, expressionsEqual)
 }
 
 func settingsStringsEqual(left string, right string) bool {

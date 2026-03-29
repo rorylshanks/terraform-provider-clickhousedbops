@@ -61,3 +61,54 @@ func TestUnwrapNullableType(t *testing.T) {
 		})
 	}
 }
+
+func TestParseCreateViewDefinition(t *testing.T) {
+	definition, err := parseCreateViewDefinition("CREATE VIEW `posthog`.`team_event_counts` (`team_id` UInt64, `event_count` Nullable(UInt64)) AS SELECT team_id, count() AS event_count FROM posthog.events GROUP BY team_id")
+	if err != nil {
+		t.Fatalf("parseCreateViewDefinition() error = %v", err)
+	}
+
+	if definition.Query != "SELECT team_id, count() AS event_count FROM posthog.events GROUP BY team_id" {
+		t.Fatalf("unexpected query: %q", definition.Query)
+	}
+	if len(definition.Columns) != 2 {
+		t.Fatalf("expected 2 columns, got %#v", definition.Columns)
+	}
+	if definition.Columns[0] != (Column{Name: "team_id", Type: "UInt64", Nullable: false}) {
+		t.Fatalf("unexpected first column: %#v", definition.Columns[0])
+	}
+	if definition.Columns[1] != (Column{Name: "event_count", Type: "UInt64", Nullable: true}) {
+		t.Fatalf("unexpected second column: %#v", definition.Columns[1])
+	}
+}
+
+func TestParseCreateViewDefinitionWithoutSignature(t *testing.T) {
+	definition, err := parseCreateViewDefinition("CREATE VIEW `posthog`.`team_event_counts` AS SELECT team_id FROM posthog.events")
+	if err != nil {
+		t.Fatalf("parseCreateViewDefinition() error = %v", err)
+	}
+
+	if definition.Query != "SELECT team_id FROM posthog.events" {
+		t.Fatalf("unexpected query: %q", definition.Query)
+	}
+	if len(definition.Columns) != 0 {
+		t.Fatalf("expected no explicit columns, got %#v", definition.Columns)
+	}
+}
+
+func TestTableColumnKeyStableForDuplicateClusterRows(t *testing.T) {
+	left := Column{
+		Name:     "id",
+		Type:     "UInt64",
+		Nullable: false,
+	}
+	right := Column{
+		Name:     "id",
+		Type:     "UInt64",
+		Nullable: false,
+	}
+
+	if tableColumnKey(left) != tableColumnKey(right) {
+		t.Fatalf("expected identical columns to produce the same dedupe key")
+	}
+}

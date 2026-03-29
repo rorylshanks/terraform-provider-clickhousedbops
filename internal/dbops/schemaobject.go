@@ -2,6 +2,7 @@ package dbops
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/pingcap/errors"
@@ -147,7 +148,6 @@ func (i *impl) GetTable(ctx context.Context, database string, name string, clust
 		SampleBy:        definition.SampleBy,
 		TTL:             definition.TTL,
 		Settings:        definition.Settings,
-		AsSelect:        definition.AsSelect,
 		CreateStatement: object.CreateStatement,
 	}, nil
 }
@@ -213,9 +213,16 @@ func (i *impl) GetView(ctx context.Context, database string, name string, cluste
 		return nil, nil
 	}
 
+	definition, err := parseCreateViewDefinition(object.CreateStatement)
+	if err != nil {
+		return nil, err
+	}
+
 	return &View{
 		Database:        object.Database,
 		Name:            object.Name,
+		Columns:         definition.Columns,
+		Query:           definition.Query,
 		CreateStatement: object.CreateStatement,
 	}, nil
 }
@@ -410,6 +417,11 @@ type createTableClause struct {
 	index   int
 }
 
+type createViewDefinition struct {
+	Columns []Column
+	Query   string
+}
+
 func (i *impl) getTableColumns(ctx context.Context, database string, name string, clusterName *string) ([]Column, error) {
 	sql, err := querybuilder.NewSelect(
 		[]querybuilder.Field{
@@ -429,6 +441,7 @@ func (i *impl) getTableColumns(ctx context.Context, database string, name string
 	}
 
 	columns := make([]Column, 0)
+	seen := make(map[string]struct{})
 	err = i.clickhouseClient.Select(ctx, sql, func(data clickhouseclient.Row) error {
 		columnName, err := data.GetString("name")
 		if err != nil {
@@ -471,6 +484,11 @@ func (i *impl) getTableColumns(ctx context.Context, database string, name string
 			column.AliasExpression = &expr
 		}
 
+		columnKey := tableColumnKey(column)
+		if _, ok := seen[columnKey]; ok {
+			return nil
+		}
+		seen[columnKey] = struct{}{}
 		columns = append(columns, column)
 		return nil
 	})
@@ -479,6 +497,33 @@ func (i *impl) getTableColumns(ctx context.Context, database string, name string
 	}
 
 	return columns, nil
+}
+
+func tableColumnKey(column Column) string {
+	defaultExpression := ""
+	if column.DefaultExpression != nil {
+		defaultExpression = *column.DefaultExpression
+	}
+
+	materializedExpression := ""
+	if column.MaterializedExpression != nil {
+		materializedExpression = *column.MaterializedExpression
+	}
+
+	aliasExpression := ""
+	if column.AliasExpression != nil {
+		aliasExpression = *column.AliasExpression
+	}
+
+	return strings.Join([]string{
+		column.Name,
+		column.Type,
+		fmt.Sprintf("%t", column.Nullable),
+		column.Comment,
+		defaultExpression,
+		materializedExpression,
+		aliasExpression,
+	}, "\x00")
 }
 
 func parseCreateTableDefinition(createStatement string) (createTableDefinition, error) {
@@ -534,6 +579,40 @@ func parseCreateTableDefinition(createStatement string) (createTableDefinition, 
 	return definition, nil
 }
 
+func parseCreateViewDefinition(createStatement string) (createViewDefinition, error) {
+	definition := createViewDefinition{}
+	statement := strings.TrimSpace(strings.TrimSuffix(createStatement, ";"))
+	if statement == "" {
+		return definition, nil
+	}
+
+	asIndex := findTopLevelKeyword(statement, "AS", 0)
+	if asIndex == -1 {
+		return definition, errors.New("unable to locate AS clause in CREATE VIEW statement")
+	}
+
+	definition.Query = strings.TrimSpace(statement[asIndex+len("AS"):])
+	prefix := strings.TrimSpace(statement[:asIndex])
+	if prefix == "" {
+		return definition, nil
+	}
+
+	openIndex, closeIndex, ok, err := findTrailingTopLevelParentheses(prefix)
+	if err != nil {
+		return definition, err
+	}
+	if !ok {
+		return definition, nil
+	}
+
+	columns, err := parseColumnSignatures(prefix[openIndex+1 : closeIndex])
+	if err != nil {
+		return definition, err
+	}
+	definition.Columns = columns
+	return definition, nil
+}
+
 func findNextCreateTableClause(raw string, start int) *createTableClause {
 	keywords := []string{"PARTITION BY", "ORDER BY", "PRIMARY KEY", "SAMPLE BY", "TTL", "SETTINGS", "AS"}
 
@@ -549,6 +628,148 @@ func findNextCreateTableClause(raw string, start int) *createTableClause {
 	}
 
 	return next
+}
+
+func findTrailingTopLevelParentheses(raw string) (int, int, bool, error) {
+	state := querybuilder.SQLScanState{}
+	closeIndex := -1
+	for index := 0; index < len(raw); index++ {
+		var err error
+		index, err = querybuilder.AdvanceSQLScanState(raw, index, &state)
+		if err != nil {
+			return 0, 0, false, err
+		}
+		if !state.IsTopLevel() {
+			continue
+		}
+		if raw[index] == ')' {
+			closeIndex = index
+		}
+	}
+	if closeIndex == -1 {
+		return 0, 0, false, nil
+	}
+
+	state = querybuilder.SQLScanState{}
+	openIndex := -1
+	for index := 0; index <= closeIndex; index++ {
+		ch := raw[index]
+		if state.IsTopLevel() && ch == '(' {
+			openIndex = index
+		}
+
+		var err error
+		index, err = querybuilder.AdvanceSQLScanState(raw, index, &state)
+		if err != nil {
+			return 0, 0, false, err
+		}
+	}
+	if openIndex == -1 || !state.IsTopLevel() {
+		return 0, 0, false, errors.New("unable to parse CREATE VIEW column signature")
+	}
+
+	if strings.TrimSpace(raw[closeIndex+1:]) != "" {
+		return 0, 0, false, nil
+	}
+
+	return openIndex, closeIndex, true, nil
+}
+
+func parseColumnSignatures(raw string) ([]Column, error) {
+	parts, err := splitTopLevelCSV(raw)
+	if err != nil {
+		return nil, err
+	}
+	if len(parts) == 0 {
+		return nil, nil
+	}
+
+	columns := make([]Column, 0, len(parts))
+	for _, part := range parts {
+		column, err := parseColumnSignature(part)
+		if err != nil {
+			return nil, err
+		}
+		columns = append(columns, column)
+	}
+
+	return columns, nil
+}
+
+func parseColumnSignature(raw string) (Column, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return Column{}, errors.New("empty column signature")
+	}
+
+	nameEnd, err := findColumnNameEnd(raw)
+	if err != nil {
+		return Column{}, err
+	}
+
+	name := unquoteIdentifier(strings.TrimSpace(raw[:nameEnd]))
+	typeSQL := strings.TrimSpace(raw[nameEnd:])
+	if name == "" || typeSQL == "" {
+		return Column{}, errors.New("invalid column signature")
+	}
+
+	typeWithoutNullable, nullable := unwrapNullableType(typeSQL)
+	return Column{
+		Name:     name,
+		Type:     typeWithoutNullable,
+		Nullable: nullable,
+	}, nil
+}
+
+func findColumnNameEnd(raw string) (int, error) {
+	state := querybuilder.SQLScanState{}
+	for index := 0; index < len(raw); index++ {
+		var err error
+		index, err = querybuilder.AdvanceSQLScanState(raw, index, &state)
+		if err != nil {
+			return 0, err
+		}
+		if !state.IsTopLevel() {
+			continue
+		}
+		if raw[index] == ' ' || raw[index] == '\t' || raw[index] == '\n' || raw[index] == '\r' {
+			return index, nil
+		}
+	}
+	return 0, errors.New("unable to parse column name")
+}
+
+func splitTopLevelCSV(raw string) ([]string, error) {
+	parts := make([]string, 0)
+	start := 0
+	state := querybuilder.SQLScanState{}
+	for index := 0; index < len(raw); index++ {
+		var err error
+		index, err = querybuilder.AdvanceSQLScanState(raw, index, &state)
+		if err != nil {
+			return nil, err
+		}
+		if !state.IsTopLevel() || raw[index] != ',' {
+			continue
+		}
+		parts = append(parts, strings.TrimSpace(raw[start:index]))
+		start = index + 1
+	}
+
+	last := strings.TrimSpace(raw[start:])
+	if last != "" {
+		parts = append(parts, last)
+	}
+
+	return parts, nil
+}
+
+func unquoteIdentifier(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if len(raw) >= 2 && raw[0] == '`' && raw[len(raw)-1] == '`' {
+		return strings.ReplaceAll(raw[1:len(raw)-1], "``", "`")
+	}
+	return raw
 }
 
 func findTopLevelKeyword(raw string, keyword string, start int) int {

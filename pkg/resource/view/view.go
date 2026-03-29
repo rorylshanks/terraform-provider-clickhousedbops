@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -12,6 +13,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 
 	"github.com/ClickHouse/terraform-provider-clickhousedbops/internal/dbops"
 	"github.com/ClickHouse/terraform-provider-clickhousedbops/pkg/resource/schemahelpers"
@@ -143,6 +145,11 @@ func (r *Resource) Read(ctx context.Context, req resource.ReadRequest, resp *res
 		return
 	}
 
+	resp.Diagnostics.Append(syncViewState(ctx, &state, view)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	schemahelpers.SyncObjectState(state.ClusterName, state.Database, state.Name, view.CreateStatement, &state.ID, &state.QualifiedName, &state.CreateStatement)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
@@ -203,4 +210,23 @@ func expandViewModel(ctx context.Context, plan ViewResourceModel) (dbops.View, e
 		Columns:  columns,
 		Query:    plan.Query.ValueString(),
 	}, nil
+}
+
+func syncViewState(ctx context.Context, state *ViewResourceModel, view *dbops.View) diag.Diagnostics {
+	var diags diag.Diagnostics
+
+	if strings.TrimSpace(view.Query) != "" {
+		state.Query = types.StringValue(view.Query)
+	}
+
+	if len(view.Columns) > 0 || (!state.Columns.IsNull() && !state.Columns.IsUnknown()) {
+		columns, columnDiags := schemahelpers.ColumnSignaturesValue(ctx, view.Columns)
+		diags.Append(columnDiags...)
+		if diags.HasError() {
+			return diags
+		}
+		state.Columns = columns
+	}
+
+	return diags
 }
