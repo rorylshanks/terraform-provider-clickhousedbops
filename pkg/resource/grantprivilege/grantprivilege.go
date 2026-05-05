@@ -48,7 +48,7 @@ func (r *Resource) Metadata(_ context.Context, req resource.MetadataRequest, res
 func (r *Resource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	validPrivileges := make([]string, 0)
 
-	upstrGrts := parseGrants()
+	upstrGrts := parsedGrants()
 
 	for privilege := range upstrGrts.Scopes {
 		validPrivileges = append(validPrivileges, privilege)
@@ -169,7 +169,7 @@ func (r *Resource) ModifyPlan(ctx context.Context, req resource.ModifyPlanReques
 		return
 	}
 
-	upstrGrts := parseGrants()
+	upstrGrts := parsedGrants()
 
 	var plan, state, config GrantPrivilege
 	diags := req.Plan.Get(ctx, &plan)
@@ -190,24 +190,24 @@ func (r *Resource) ModifyPlan(ctx context.Context, req resource.ModifyPlanReques
 		return
 	}
 
-	if r.client != nil {
+	// Only check replicated storage when cluster_name is set, to avoid
+	// unnecessary connections (e.g. during terraform plan -refresh=false).
+	if r.client != nil && !config.ClusterName.IsNull() {
 		isReplicatedStorage, err := r.client.IsReplicatedStorage(ctx)
 		if err != nil {
-			resp.Diagnostics.AddError(
-				"Error Checking if service is using replicated storage",
-				fmt.Sprintf("%+v\n", err),
+			resp.Diagnostics.AddWarning(
+				"Could not check if service is using replicated storage",
+				fmt.Sprintf("Skipping validation. If you are using replicated storage, please remove the 'cluster_name' attribute from your resource definition. Error: %+v", err),
 			)
 			return
 		}
 
+		// GrantPrivilege cannot specify 'cluster_name' or apply will fail.
 		if isReplicatedStorage {
-			// GrantPrivilege cannot specify 'cluster_name' or apply will fail.
-			if !config.ClusterName.IsNull() {
-				resp.Diagnostics.AddWarning(
-					"Invalid configuration",
-					"Your ClickHouse cluster is using Replicated storage for grants, please remove the 'cluster_name' attribute from your GrantPrivilege resource definition if you encounter any errors.",
-				)
-			}
+			resp.Diagnostics.AddWarning(
+				"Invalid configuration",
+				"Your ClickHouse cluster is using Replicated storage for grants, please remove the 'cluster_name' attribute from your GrantPrivilege resource definition if you encounter any errors.",
+			)
 		}
 	}
 
@@ -271,14 +271,16 @@ func (r *Resource) Create(ctx context.Context, req resource.CreateRequest, resp 
 		return
 	}
 
+	upstrGrts := parsedGrants()
 	grant := dbops.GrantPrivilege{
-		AccessType:      plan.Privilege.ValueString(),
-		DatabaseName:    plan.Database.ValueStringPointer(),
-		TableName:       plan.Table.ValueStringPointer(),
-		ColumnName:      plan.Column.ValueStringPointer(),
-		GranteeUserName: plan.GranteeUserName.ValueStringPointer(),
-		GranteeRoleName: plan.GranteeRoleName.ValueStringPointer(),
-		GrantOption:     plan.GrantOption.ValueBool(),
+		AccessType:          plan.Privilege.ValueString(),
+		ExpandedAccessTypes: AllDescendants(upstrGrts.Groups, plan.Privilege.ValueString()),
+		DatabaseName:        plan.Database.ValueStringPointer(),
+		TableName:           plan.Table.ValueStringPointer(),
+		ColumnName:          plan.Column.ValueStringPointer(),
+		GranteeUserName:     plan.GranteeUserName.ValueStringPointer(),
+		GranteeRoleName:     plan.GranteeRoleName.ValueStringPointer(),
+		GrantOption:         plan.GrantOption.ValueBool(),
 	}
 
 	createdGrant, err := r.client.GrantPrivilege(ctx, grant, plan.ClusterName.ValueStringPointer())
@@ -354,14 +356,16 @@ func (r *Resource) Read(ctx context.Context, req resource.ReadRequest, resp *res
 		return
 	}
 
+	upstrGrts := parsedGrants()
 	grantPrivilege := dbops.GrantPrivilege{
-		AccessType:      state.Privilege.ValueString(),
-		DatabaseName:    state.Database.ValueStringPointer(),
-		TableName:       state.Table.ValueStringPointer(),
-		ColumnName:      state.Column.ValueStringPointer(),
-		GranteeUserName: state.GranteeUserName.ValueStringPointer(),
-		GranteeRoleName: state.GranteeRoleName.ValueStringPointer(),
-		GrantOption:     state.GrantOption.ValueBool(),
+		AccessType:          state.Privilege.ValueString(),
+		ExpandedAccessTypes: AllDescendants(upstrGrts.Groups, state.Privilege.ValueString()),
+		DatabaseName:        state.Database.ValueStringPointer(),
+		TableName:           state.Table.ValueStringPointer(),
+		ColumnName:          state.Column.ValueStringPointer(),
+		GranteeUserName:     state.GranteeUserName.ValueStringPointer(),
+		GranteeRoleName:     state.GranteeRoleName.ValueStringPointer(),
+		GrantOption:         state.GrantOption.ValueBool(),
 	}
 
 	grant, err := r.client.GetGrantPrivilege(ctx, &grantPrivilege, state.ClusterName.ValueStringPointer())

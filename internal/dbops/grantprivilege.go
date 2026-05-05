@@ -41,6 +41,11 @@ type GrantPrivilege struct {
 	GranteeUserName *string `json:"user_name"`
 	GranteeRoleName *string `json:"role_name"`
 	GrantOption     bool    `json:"grant_option"`
+	// ExpandedAccessTypes includes AccessType and all its descendants.
+	// ClickHouse may expand a parent privilege (e.g. CREATE, ACCESS MANAGEMENT)
+	// into its children in system.grants instead of storing a single parent row.
+	// Setting this field allows the matcher to find the grant in either case.
+	ExpandedAccessTypes []string `json:"-"`
 }
 
 // Defines the signature for a function that checks if privileges are granted.
@@ -83,7 +88,7 @@ func (i *impl) GrantPrivilege(ctx context.Context, grantPrivilege GrantPrivilege
 
 	return retryWithBackoff(ctx, "grant privilege", identifier, func() (*GrantPrivilege, error) {
 		return i.GetGrantPrivilege(ctx, &grantPrivilege, clusterName)
-	})
+	}, i.readAfterWriteTimeoutArgs()...)
 }
 
 // Matcher function to handle classic grants: https://clickhouse.com/docs/sql-reference/statements/grant#granting-privilege-syntax
@@ -102,8 +107,13 @@ func ClassicGrantMatcher(ctx context.Context, priv *GrantPrivilege, clusterName 
 		tblName = &stripped
 	}
 
+	accessTypes := priv.ExpandedAccessTypes
+	if len(accessTypes) == 0 {
+		accessTypes = []string{priv.AccessType}
+	}
+
 	where := []querybuilder.Where{
-		querybuilder.WhereEquals("access_type", priv.AccessType),
+		querybuilder.WhereIn("access_type", accessTypes),
 		valOrNullWhere("database", dbName),
 		valOrNullWhere("table", tblName),
 		valOrNullWhere("column", priv.ColumnName),
