@@ -232,13 +232,19 @@ func TestParseCreateMaterializedViewDefinition_ToTable(t *testing.T) {
 }
 
 func TestParseCreateMaterializedViewDefinition_EngineBacked(t *testing.T) {
-	stmt := "CREATE MATERIALIZED VIEW `mydb`.`mv` (`id` UInt64, `cnt` UInt64) ENGINE = MergeTree() ORDER BY id AS SELECT id, count() AS cnt FROM mydb.source GROUP BY id"
+	stmt := "CREATE MATERIALIZED VIEW `mydb`.`mv` (`id` UInt64, `cnt` UInt64) ENGINE = MergeTree() PARTITION BY toYYYYMM(ts) ORDER BY id PRIMARY KEY id SAMPLE BY id TTL ts + INTERVAL 1 DAY SETTINGS index_granularity = 8192 AS SELECT id, count() AS cnt FROM mydb.source GROUP BY id"
 	definition, err := parseCreateMaterializedViewDefinition(stmt)
 	if err != nil {
 		t.Fatalf("parseCreateMaterializedViewDefinition() error = %v", err)
 	}
-	if definition.Engine != "MergeTree() ORDER BY id" {
+	if definition.Engine != "MergeTree()" {
 		t.Fatalf("unexpected engine: %q", definition.Engine)
+	}
+	if definition.PartitionBy != "toYYYYMM(ts)" || definition.OrderBy != "id" || definition.PrimaryKey != "id" || definition.SampleBy != "id" {
+		t.Fatalf("unexpected engine-backed clauses: %#v", definition)
+	}
+	if definition.TTL != "ts + INTERVAL 1 DAY" || definition.Settings != "index_granularity = 8192" {
+		t.Fatalf("unexpected ttl/settings: %#v", definition)
 	}
 	if definition.Query != "SELECT id, count() AS cnt FROM mydb.source GROUP BY id" {
 		t.Fatalf("unexpected query: %q", definition.Query)
@@ -320,7 +326,10 @@ func TestParseCreateMaterializedViewDefinition_ToColumnsAndPopulate(t *testing.T
 	if !definition.Populate {
 		t.Fatal("expected populate to be parsed")
 	}
-	if definition.Engine != "MergeTree() ORDER BY id" {
+	if definition.Engine != "MergeTree()" {
 		t.Fatalf("unexpected engine: %q", definition.Engine)
+	}
+	if definition.OrderBy != "id" {
+		t.Fatalf("unexpected order_by: %q", definition.OrderBy)
 	}
 }

@@ -46,6 +46,12 @@ type CreateMaterializedViewQuery struct {
 	ClusterName *string
 	Columns     []ColumnDefinition
 	Engine      string
+	PartitionBy string
+	OrderBy     string
+	PrimaryKey  string
+	SampleBy    string
+	TTL         string
+	Settings    string
 	Populate    bool
 	ToTable     string
 	ToColumns   []ColumnDefinition
@@ -158,6 +164,17 @@ func (q CreateMaterializedViewQuery) Build() (string, error) {
 	if hasToTable && len(q.Columns) > 0 {
 		return "", errors.New("columns can only be set for engine-backed materialized views")
 	}
+	if hasEngine {
+		if strings.TrimSpace(q.OrderBy) == "" {
+			return "", errors.New("engine-backed materialized views require order_by")
+		}
+	}
+	if hasToTable {
+		if strings.TrimSpace(q.PartitionBy) != "" || strings.TrimSpace(q.OrderBy) != "" || strings.TrimSpace(q.PrimaryKey) != "" ||
+			strings.TrimSpace(q.SampleBy) != "" || strings.TrimSpace(q.TTL) != "" || strings.TrimSpace(q.Settings) != "" {
+			return "", errors.New("engine-backed table clauses can only be set when engine is set")
+		}
+	}
 
 	tokens := []string{
 		"CREATE",
@@ -185,6 +202,24 @@ func (q CreateMaterializedViewQuery) Build() (string, error) {
 	}
 	if hasEngine {
 		tokens = append(tokens, "ENGINE", "=", strings.TrimSpace(q.Engine))
+		if strings.TrimSpace(q.PartitionBy) != "" {
+			tokens = append(tokens, "PARTITION BY", strings.TrimSpace(q.PartitionBy))
+		}
+		if strings.TrimSpace(q.OrderBy) != "" {
+			tokens = append(tokens, "ORDER BY", strings.TrimSpace(q.OrderBy))
+		}
+		if strings.TrimSpace(q.PrimaryKey) != "" {
+			tokens = append(tokens, "PRIMARY KEY", strings.TrimSpace(q.PrimaryKey))
+		}
+		if strings.TrimSpace(q.SampleBy) != "" {
+			tokens = append(tokens, "SAMPLE BY", strings.TrimSpace(q.SampleBy))
+		}
+		if strings.TrimSpace(q.TTL) != "" {
+			tokens = append(tokens, "TTL", strings.TrimSpace(q.TTL))
+		}
+		if strings.TrimSpace(q.Settings) != "" {
+			tokens = append(tokens, "SETTINGS", strings.TrimSpace(q.Settings))
+		}
 	}
 	if q.Populate {
 		tokens = append(tokens, "POPULATE")

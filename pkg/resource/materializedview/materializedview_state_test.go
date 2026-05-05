@@ -58,7 +58,8 @@ func TestSyncMaterializedViewStateSyncsPopulateFlag(t *testing.T) {
 	}
 
 	remote := &dbops.MaterializedView{
-		Engine:   "MergeTree() ORDER BY id",
+		Engine:   "MergeTree()",
+		OrderBy:  "id",
 		Populate: false,
 		Query:    "SELECT id FROM posthog.events",
 	}
@@ -69,5 +70,30 @@ func TestSyncMaterializedViewStateSyncsPopulateFlag(t *testing.T) {
 	}
 	if state.Populate.ValueBool() {
 		t.Fatal("expected populate to be reset from remote state")
+	}
+}
+
+func TestSyncMaterializedViewStateSyncsEngineBackedClauses(t *testing.T) {
+	ctx := context.Background()
+	state := MaterializedViewResourceModel{}
+
+	remote := &dbops.MaterializedView{
+		Engine:      "MergeTree()",
+		PartitionBy: "toYYYYMM(created_at)",
+		OrderBy:     "(team_id, created_at)",
+		PrimaryKey:  "team_id",
+		SampleBy:    "team_id",
+		TTL:         "created_at + INTERVAL 1 DAY",
+		Settings:    "index_granularity = 8192",
+		Query:       "SELECT team_id, created_at FROM posthog.events",
+	}
+
+	diags := syncMaterializedViewState(ctx, &state, remote)
+	if diags.HasError() {
+		t.Fatalf("syncMaterializedViewState() diagnostics = %v", diags)
+	}
+
+	if state.Engine.ValueString() != remote.Engine || state.OrderBy.ValueString() != remote.OrderBy || state.Settings.ValueString() != remote.Settings {
+		t.Fatalf("expected engine-backed clauses to sync from remote, got %#v", state)
 	}
 }

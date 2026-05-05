@@ -153,6 +153,33 @@ func Test_createMaterializedViewToTable(t *testing.T) {
 	}
 }
 
+func Test_createMaterializedViewEngineBacked(t *testing.T) {
+	got, err := CreateMaterializedViewQuery{
+		Database:    "posthog",
+		Name:        "events_mv",
+		Engine:      "MergeTree()",
+		PartitionBy: "toYYYYMM(created_at)",
+		OrderBy:     "team_id",
+		PrimaryKey:  "team_id",
+		SampleBy:    "team_id",
+		TTL:         "created_at + INTERVAL 1 DAY",
+		Settings:    "index_granularity = 8192",
+		Columns: []ColumnDefinition{
+			{Name: "team_id", Type: "UInt64"},
+			{Name: "event_count", Type: "UInt64"},
+		},
+		Query: "SELECT team_id, count() AS event_count FROM posthog.events GROUP BY team_id",
+	}.Build()
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+
+	want := "CREATE MATERIALIZED VIEW `posthog`.`events_mv` (`team_id` UInt64, `event_count` UInt64) ENGINE = MergeTree() PARTITION BY toYYYYMM(created_at) ORDER BY team_id PRIMARY KEY team_id SAMPLE BY team_id TTL created_at + INTERVAL 1 DAY SETTINGS index_granularity = 8192 AS SELECT team_id, count() AS event_count FROM posthog.events GROUP BY team_id;"
+	if got != want {
+		t.Fatalf("Build() got = %v, want %v", got, want)
+	}
+}
+
 func Test_createMaterializedViewRequiresExactlyOneTargetMode(t *testing.T) {
 	_, err := CreateMaterializedViewQuery{
 		Database: "posthog",
@@ -178,5 +205,21 @@ func Test_createMaterializedViewRejectsColumnsWithToTable(t *testing.T) {
 	}.Build()
 	if err == nil {
 		t.Fatal("expected Build() to fail when columns are set for a TO-backed materialized view")
+	}
+}
+
+func Test_createMaterializedViewRejectsToColumnsWithEngine(t *testing.T) {
+	_, err := CreateMaterializedViewQuery{
+		Database: "posthog",
+		Name:     "events_mv",
+		Engine:   "MergeTree()",
+		OrderBy:  "team_id",
+		ToColumns: []ColumnDefinition{
+			{Name: "team_id", Type: "UInt64"},
+		},
+		Query: "SELECT 1",
+	}.Build()
+	if err == nil {
+		t.Fatal("expected Build() to fail when to_columns are set for an engine-backed materialized view")
 	}
 }

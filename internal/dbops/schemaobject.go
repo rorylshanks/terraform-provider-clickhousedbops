@@ -49,6 +49,12 @@ type MaterializedView struct {
 	Name            string
 	Columns         []Column
 	Engine          string
+	PartitionBy     string
+	OrderBy         string
+	PrimaryKey      string
+	SampleBy        string
+	TTL             string
+	Settings        string
 	Populate        bool
 	ToTable         string
 	ToColumns       []Column
@@ -235,6 +241,12 @@ func (i *impl) CreateMaterializedView(ctx context.Context, view MaterializedView
 		ClusterName: clusterName,
 		Columns:     toQueryBuilderColumns(view.Columns),
 		Engine:      view.Engine,
+		PartitionBy: view.PartitionBy,
+		OrderBy:     view.OrderBy,
+		PrimaryKey:  view.PrimaryKey,
+		SampleBy:    view.SampleBy,
+		TTL:         view.TTL,
+		Settings:    view.Settings,
 		Populate:    view.Populate,
 		ToTable:     view.ToTable,
 		ToColumns:   toQueryBuilderColumns(view.ToColumns),
@@ -269,6 +281,12 @@ func (i *impl) GetMaterializedView(ctx context.Context, database string, name st
 		Database:        object.Database,
 		Name:            object.Name,
 		Engine:          definition.Engine,
+		PartitionBy:     definition.PartitionBy,
+		OrderBy:         definition.OrderBy,
+		PrimaryKey:      definition.PrimaryKey,
+		SampleBy:        definition.SampleBy,
+		TTL:             definition.TTL,
+		Settings:        definition.Settings,
 		Populate:        definition.Populate,
 		ToTable:         definition.ToTable,
 		ToColumns:       definition.ToColumns,
@@ -402,12 +420,18 @@ type createViewDefinition struct {
 }
 
 type createMaterializedViewDefinition struct {
-	Columns   []Column
-	Engine    string
-	Populate  bool
-	ToTable   string
-	ToColumns []Column
-	Query     string
+	Columns     []Column
+	Engine      string
+	PartitionBy string
+	OrderBy     string
+	PrimaryKey  string
+	SampleBy    string
+	TTL         string
+	Settings    string
+	Populate    bool
+	ToTable     string
+	ToColumns   []Column
+	Query       string
 }
 
 func (i *impl) getTableColumns(ctx context.Context, database string, name string, clusterName *string) ([]Column, error) {
@@ -668,9 +692,48 @@ func parseCreateMaterializedViewDefinition(createStatement string) (createMateri
 		return definition, err
 	}
 	if engineIndex != -1 {
-		definition.Engine = strings.TrimSpace(prefix[engineIndex+len("ENGINE ="):])
-		// Engine value may be followed by ORDER BY etc. — find trailing parens for column signatures
-		// above the ENGINE clause
+		engineValueStart := engineIndex + len("ENGINE =")
+		nextClause, clauseErr := findNextCreateTableClause(prefix, engineValueStart)
+		if clauseErr != nil {
+			return definition, clauseErr
+		}
+		engineValueEnd := len(prefix)
+		if nextClause != nil {
+			engineValueEnd = nextClause.index
+		}
+		definition.Engine = strings.TrimSpace(prefix[engineValueStart:engineValueEnd])
+
+		for clause := nextClause; clause != nil; {
+			valueStart := clause.index + len(clause.keyword)
+			nextClause, clauseErr = findNextCreateTableClause(prefix, valueStart)
+			if clauseErr != nil {
+				return definition, clauseErr
+			}
+			valueEnd := len(prefix)
+			if nextClause != nil {
+				valueEnd = nextClause.index
+			}
+
+			value := strings.TrimSpace(prefix[valueStart:valueEnd])
+			switch clause.keyword {
+			case "PARTITION BY":
+				definition.PartitionBy = value
+			case "ORDER BY":
+				definition.OrderBy = value
+			case "PRIMARY KEY":
+				definition.PrimaryKey = value
+			case "SAMPLE BY":
+				definition.SampleBy = value
+			case "TTL":
+				definition.TTL = value
+			case "SETTINGS":
+				definition.Settings = value
+			}
+
+			clause = nextClause
+		}
+
+		// Engine value may be preceded by column signatures in parens.
 		columnPrefix := strings.TrimSpace(prefix[:engineIndex])
 		if openIdx, closeIdx, ok, parseErr := querybuilder.FindTrailingTopLevelParentheses(columnPrefix); parseErr != nil {
 			return definition, parseErr

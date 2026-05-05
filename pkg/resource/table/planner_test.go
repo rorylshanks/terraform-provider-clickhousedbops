@@ -267,3 +267,59 @@ func TestUnwrapOuterParensIgnoresQuotedParen(t *testing.T) {
 		t.Fatalf("unwrapOuterParens() got = %q, want %q", got, want)
 	}
 }
+
+func TestExtractIdentifiersIgnoresQuotedStringsAndFunctionNames(t *testing.T) {
+	identifiers := extractIdentifiers("toDate(created_at) = toDate('created_at')")
+
+	if len(identifiers) != 1 || identifiers[0] != "created_at" {
+		t.Fatalf("extractIdentifiers() got %v, want [created_at]", identifiers)
+	}
+}
+
+func TestPlanTableUpdateAllowsRenameWhenOnlyQuotedStringMatchesOldName(t *testing.T) {
+	current := dbops.Table{
+		Engine:  "MergeTree()",
+		OrderBy: "tuple()",
+		Columns: []dbops.Column{
+			{Name: "id", Type: "UInt64"},
+			{Name: "message", Type: "String", DefaultExpression: stringPtr("'id'")},
+		},
+	}
+	desired := dbops.Table{
+		Engine:  "MergeTree()",
+		OrderBy: "tuple()",
+		Columns: []dbops.Column{
+			{Name: "user_id", Type: "UInt64"},
+			{Name: "message", Type: "String", DefaultExpression: stringPtr("'id'")},
+		},
+	}
+
+	plan, err := planTableUpdate(current, desired, dbops.TableEngineCapabilities{
+		Name:              "MergeTree",
+		Known:             true,
+		SupportsSettings:  true,
+		SupportsSortOrder: true,
+		SupportsTTL:       true,
+	}, nil)
+	if err != nil {
+		t.Fatalf("planTableUpdate() error = %v", err)
+	}
+	if _, ok := plan.ReplaceAttrs["columns"]; ok {
+		t.Fatalf("expected quoted string literal not to force replacement, got %v", plan.ReplaceAttrs)
+	}
+	foundRename := false
+	for _, group := range plan.ActionGroups {
+		for _, action := range group {
+			if strings.Contains(action, "RENAME COLUMN `id` TO `user_id`") {
+				foundRename = true
+			}
+		}
+	}
+	if !foundRename {
+		t.Fatalf("expected rename action, got %v", plan.ActionGroups)
+	}
+}
+
+func stringPtr(value string) *string {
+	return &value
+}

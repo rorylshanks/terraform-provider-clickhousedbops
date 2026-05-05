@@ -57,6 +57,66 @@ func (r *Resource) Schema(_ context.Context, _ resource.SchemaRequest, resp *res
 			stringplanmodifier.RequiresReplace(),
 		},
 	}
+	attrs["partition_by"] = schema.StringAttribute{
+		Optional:    true,
+		Description: "Raw PARTITION BY clause expression for engine-backed materialized views",
+		Validators: []validator.String{
+			stringvalidator.LengthAtLeast(1),
+		},
+		PlanModifiers: []planmodifier.String{
+			stringplanmodifier.RequiresReplace(),
+		},
+	}
+	attrs["order_by"] = schema.StringAttribute{
+		Optional:    true,
+		Description: "Raw ORDER BY clause expression for engine-backed materialized views",
+		Validators: []validator.String{
+			stringvalidator.LengthAtLeast(1),
+		},
+		PlanModifiers: []planmodifier.String{
+			stringplanmodifier.RequiresReplace(),
+		},
+	}
+	attrs["primary_key"] = schema.StringAttribute{
+		Optional:    true,
+		Description: "Raw PRIMARY KEY clause expression for engine-backed materialized views",
+		Validators: []validator.String{
+			stringvalidator.LengthAtLeast(1),
+		},
+		PlanModifiers: []planmodifier.String{
+			stringplanmodifier.RequiresReplace(),
+		},
+	}
+	attrs["sample_by"] = schema.StringAttribute{
+		Optional:    true,
+		Description: "Raw SAMPLE BY clause expression for engine-backed materialized views",
+		Validators: []validator.String{
+			stringvalidator.LengthAtLeast(1),
+		},
+		PlanModifiers: []planmodifier.String{
+			stringplanmodifier.RequiresReplace(),
+		},
+	}
+	attrs["ttl"] = schema.StringAttribute{
+		Optional:    true,
+		Description: "Raw TTL clause expression for engine-backed materialized views",
+		Validators: []validator.String{
+			stringvalidator.LengthAtLeast(1),
+		},
+		PlanModifiers: []planmodifier.String{
+			stringplanmodifier.RequiresReplace(),
+		},
+	}
+	attrs["settings"] = schema.StringAttribute{
+		Optional:    true,
+		Description: "Raw SETTINGS clause body for engine-backed materialized views",
+		Validators: []validator.String{
+			stringvalidator.LengthAtLeast(1),
+		},
+		PlanModifiers: []planmodifier.String{
+			stringplanmodifier.RequiresReplace(),
+		},
+	}
 	attrs["populate"] = schema.BoolAttribute{
 		Optional:    true,
 		Description: "Whether to append POPULATE to the CREATE MATERIALIZED VIEW statement",
@@ -131,6 +191,41 @@ func (r *Resource) ValidateConfig(ctx context.Context, req resource.ValidateConf
 			"Invalid Attribute Combination",
 			"'columns' can only be set for engine-backed materialized views. Use 'to_columns' with 'to_table' instead.",
 		)
+	}
+	if !config.Engine.IsNull() && !config.Engine.IsUnknown() && !config.ToColumns.IsNull() && !config.ToColumns.IsUnknown() {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("to_columns"),
+			"Invalid Attribute Combination",
+			"'to_columns' can only be set with 'to_table' and cannot be combined with 'engine'.",
+		)
+	}
+	if !config.Engine.IsNull() && !config.Engine.IsUnknown() && (config.OrderBy.IsNull() || config.OrderBy.IsUnknown() || config.OrderBy.ValueString() == "") {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("order_by"),
+			"Missing Required Attribute for Engine-Backed Materialized View",
+			"'order_by' must be set when 'engine' is used.",
+		)
+	}
+	if !config.ToTable.IsNull() && !config.ToTable.IsUnknown() {
+		for _, attr := range []struct {
+			path  path.Path
+			value types.String
+		}{
+			{path.Root("partition_by"), config.PartitionBy},
+			{path.Root("order_by"), config.OrderBy},
+			{path.Root("primary_key"), config.PrimaryKey},
+			{path.Root("sample_by"), config.SampleBy},
+			{path.Root("ttl"), config.TTL},
+			{path.Root("settings"), config.Settings},
+		} {
+			if !attr.value.IsNull() && !attr.value.IsUnknown() {
+				resp.Diagnostics.AddAttributeError(
+					attr.path,
+					"Invalid Attribute Combination",
+					"Engine-backed table clauses cannot be combined with 'to_table'.",
+				)
+			}
+		}
 	}
 }
 
@@ -230,6 +325,12 @@ func syncMaterializedViewState(ctx context.Context, state *MaterializedViewResou
 
 	state.Query = schemahelpers.SyncOptionalString(state.Query, view.Query)
 	state.Engine = schemahelpers.SyncOptionalString(state.Engine, view.Engine)
+	state.PartitionBy = schemahelpers.SyncOptionalString(state.PartitionBy, view.PartitionBy)
+	state.OrderBy = schemahelpers.SyncOptionalString(state.OrderBy, view.OrderBy)
+	state.PrimaryKey = schemahelpers.SyncOptionalString(state.PrimaryKey, view.PrimaryKey)
+	state.SampleBy = schemahelpers.SyncOptionalString(state.SampleBy, view.SampleBy)
+	state.TTL = schemahelpers.SyncOptionalString(state.TTL, view.TTL)
+	state.Settings = schemahelpers.SyncOptionalString(state.Settings, view.Settings)
 	state.ToTable = schemahelpers.SyncOptionalString(state.ToTable, view.ToTable)
 
 	if view.Populate || (!state.Populate.IsNull() && !state.Populate.IsUnknown()) {
@@ -286,13 +387,19 @@ func expandMaterializedViewModel(ctx context.Context, plan MaterializedViewResou
 	}
 
 	return dbops.MaterializedView{
-		Database:  plan.Database.ValueString(),
-		Name:      plan.Name.ValueString(),
-		Columns:   columns,
-		Engine:    plan.Engine.ValueString(),
-		Populate:  populate,
-		ToTable:   plan.ToTable.ValueString(),
-		ToColumns: toColumns,
-		Query:     plan.Query.ValueString(),
+		Database:    plan.Database.ValueString(),
+		Name:        plan.Name.ValueString(),
+		Columns:     columns,
+		Engine:      plan.Engine.ValueString(),
+		PartitionBy: plan.PartitionBy.ValueString(),
+		OrderBy:     plan.OrderBy.ValueString(),
+		PrimaryKey:  plan.PrimaryKey.ValueString(),
+		SampleBy:    plan.SampleBy.ValueString(),
+		TTL:         plan.TTL.ValueString(),
+		Settings:    plan.Settings.ValueString(),
+		Populate:    populate,
+		ToTable:     plan.ToTable.ValueString(),
+		ToColumns:   toColumns,
+		Query:       plan.Query.ValueString(),
 	}, nil
 }

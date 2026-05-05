@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 
@@ -739,11 +741,62 @@ var (
 )
 
 func extractIdentifiers(expression string) []string {
-	matches := identifierPattern.FindAllString(expression, -1)
-	result := make([]string, 0, len(matches))
-	for _, match := range matches {
-		result = append(result, querybuilder.UnquoteIdentifier(match))
+	result := make([]string, 0)
+	seen := make(map[string]struct{})
+	state := querybuilder.SQLScanState{}
+
+	for index := 0; index < len(expression); index++ {
+		if state.InQuote != 0 {
+			next, err := querybuilder.AdvanceSQLScanState(expression, index, &state)
+			if err != nil {
+				return result
+			}
+			index = next
+			continue
+		}
+
+		ch := expression[index]
+		if ch == '`' {
+			start := index
+			next, err := querybuilder.AdvanceSQLScanState(expression, index, &state)
+			if err != nil {
+				return result
+			}
+			if state.InQuote == 0 {
+				name := querybuilder.UnquoteIdentifier(expression[start : next+1])
+				if name != "" {
+					if _, ok := seen[name]; !ok {
+						seen[name] = struct{}{}
+						result = append(result, name)
+					}
+				}
+			}
+			index = next
+			continue
+		}
+
+		if isIdentifierStart(ch) {
+			start := index
+			for index+1 < len(expression) && isIdentifierPart(expression[index+1]) {
+				index++
+			}
+			name := expression[start : index+1]
+			if !isFunctionLikeIdentifier(expression, index+1) {
+				if _, ok := seen[name]; !ok {
+					seen[name] = struct{}{}
+					result = append(result, name)
+				}
+			}
+			continue
+		}
+
+		next, err := querybuilder.AdvanceSQLScanState(expression, index, &state)
+		if err != nil {
+			return result
+		}
+		index = next
 	}
+
 	return result
 }
 
@@ -760,6 +813,28 @@ func simpleIdentifier(expression string) (string, bool) {
 		return "", false
 	}
 	return unquoted, true
+}
+
+func isIdentifierStart(ch byte) bool {
+	return ch == '_' || ('A' <= ch && ch <= 'Z') || ('a' <= ch && ch <= 'z')
+}
+
+func isIdentifierPart(ch byte) bool {
+	return isIdentifierStart(ch) || ('0' <= ch && ch <= '9')
+}
+
+func isFunctionLikeIdentifier(expression string, index int) bool {
+	for index < len(expression) {
+		r, size := utf8.DecodeRuneInString(expression[index:])
+		if r == utf8.RuneError && size == 1 {
+			break
+		}
+		if !unicode.IsSpace(r) {
+			return r == '('
+		}
+		index += size
+	}
+	return false
 }
 
 func unwrapOuterParens(value string) string {

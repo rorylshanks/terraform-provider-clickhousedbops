@@ -108,6 +108,34 @@ func TestMaterializedView_validation(t *testing.T) {
 			{
 				Config: `
 resource "clickhousedbops_materialized_view" "test" {
+  database   = "posthog"
+  name       = "events_daily_mv"
+  engine     = "MergeTree()"
+  order_by   = "team_id"
+  to_columns = [
+    { name = "team_id", type = "UInt64", nullable = false }
+  ]
+  query = "SELECT 1"
+}
+`,
+				PlanOnly:    true,
+				ExpectError: regexp.MustCompile(`(?s)Invalid Attribute Combination.*to_columns.*cannot be combined with 'engine'`),
+			},
+			{
+				Config: `
+resource "clickhousedbops_materialized_view" "test" {
+  database = "posthog"
+  name     = "events_daily_mv"
+  engine   = "MergeTree()"
+  query    = "SELECT 1"
+}
+`,
+				PlanOnly:    true,
+				ExpectError: regexp.MustCompile(`(?s)Missing Required Attribute.*order_by`),
+			},
+			{
+				Config: `
+resource "clickhousedbops_materialized_view" "test" {
   database = "posthog"
   name     = "events_daily_mv"
   to_table = "posthog.daily_event_counts"
@@ -133,6 +161,75 @@ resource "clickhousedbops_materialized_view" "test" {
 				PlanOnly:    true,
 				ExpectError: regexp.MustCompile(`(?s)Invalid Attribute Combination.*columns.*engine-backed materialized views`),
 			},
+		},
+	})
+}
+
+func TestMaterializedView_engineBackedAcceptance(t *testing.T) {
+	databaseName := fmt.Sprintf("posthog_%s", acctest.RandStringFromCharSet(10, acctest.CharSetAlphaNum))
+
+	checkNotExistsFunc := func(ctx context.Context, dbopsClient dbops.Client, clusterName *string, attrs map[string]string) (bool, error) {
+		view, err := dbopsClient.GetMaterializedView(ctx, attrs["database"], attrs["name"], clusterName)
+		return view != nil, err
+	}
+
+	checkAttributesFunc := func(ctx context.Context, dbopsClient dbops.Client, clusterName *string, attrs map[string]interface{}) error {
+		view, err := dbopsClient.GetMaterializedView(ctx, attrs["database"].(string), attrs["name"].(string), clusterName)
+		if err != nil {
+			return err
+		}
+		if view == nil {
+			return fmt.Errorf("materialized view %s.%s was not found", attrs["database"], attrs["name"])
+		}
+		if view.Engine != "MergeTree()" {
+			return fmt.Errorf("expected engine MergeTree(), got %q", view.Engine)
+		}
+		if view.OrderBy != "team_id" {
+			return fmt.Errorf("expected order_by team_id, got %q", view.OrderBy)
+		}
+		if !strings.Contains(view.CreateStatement, "ORDER BY team_id") {
+			return fmt.Errorf("expected create statement to include ORDER BY, got %q", view.CreateStatement)
+		}
+		return nil
+	}
+
+	resource := fmt.Sprintf(`
+locals {
+  rollup_columns = [
+    { name = "team_id", type = "UInt64", nullable = false },
+    { name = "event_count", type = "UInt64", nullable = false },
+  ]
+}
+
+resource "clickhousedbops_database" "posthog" {
+  name = %q
+}
+
+resource "clickhousedbops_materialized_view" "events_rollup_mv" {
+  database = clickhousedbops_database.posthog.name
+  name     = "events_rollup_mv"
+  engine   = "MergeTree()"
+  order_by = "team_id"
+  columns  = local.rollup_columns
+  query    = <<-SQL
+    SELECT team_id, count() AS event_count
+    FROM system.numbers
+    WHERE number < 10
+    GROUP BY team_id
+  SQL
+}
+`, databaseName)
+
+	runner.RunTests(t, []runner.TestCase{
+		{
+			Name:                "Create engine-backed materialized view with first-class table clauses",
+			ChEnv:               map[string]string{"CONFIGFILE": "config-single.xml"},
+			Protocol:            "native",
+			Resource:            resource,
+			ResourceName:        "events_rollup_mv",
+			ResourceAddress:     "clickhousedbops_materialized_view.events_rollup_mv",
+			CheckNotExistsFunc:  checkNotExistsFunc,
+			CheckAttributesFunc: checkAttributesFunc,
 		},
 	})
 }
